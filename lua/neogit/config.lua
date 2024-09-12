@@ -634,10 +634,19 @@ function M.validate_config()
   local function validate_kind(val, name)
     if
       validate_type(val, name, "string")
-      and not vim.tbl_contains(
-        { "split", "vsplit", "split_above", "vsplit_left", "tab", "floating", "replace", "auto" },
-        val
-      )
+      and not vim.tbl_contains({
+        "split",
+        "vsplit",
+        "split_above",
+        "split_above_all",
+        "split_below",
+        "split_below_all",
+        "vsplit_left",
+        "tab",
+        "floating",
+        "replace",
+        "auto",
+      }, val)
     then
       err(
         name,
@@ -1104,7 +1113,7 @@ function M.check_integration(name)
   local enabled = M.values.integrations[name]
 
   if enabled == nil or enabled == "auto" then
-    local success, _ = pcall(require, name)
+    local success, _ = pcall(require, name:gsub("_", "-"))
     logger.info(("[CONFIG] Found auto integration '%s = %s'"):format(name, success))
     return success
   end
