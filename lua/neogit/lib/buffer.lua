@@ -247,7 +247,10 @@ function Buffer:hide()
 end
 
 function Buffer:is_visible()
-  return #fn.win_findbuf(self.handle) > 0
+  local buffer_in_window = #fn.win_findbuf(self.handle) > 0
+  local window_in_tabpage = vim.tbl_contains(api.nvim_tabpage_list_wins(0), self.win_handle)
+
+  return buffer_in_window and window_in_tabpage
 end
 
 ---@return number
@@ -495,7 +498,9 @@ function Buffer:line_count()
   return api.nvim_buf_line_count(self.handle)
 end
 
-function Buffer:set_header(text)
+---@param text string
+---@param scroll boolean
+function Buffer:set_header(text, scroll)
   -- Create a blank line at the top of the buffer so our floating window doesn't
   -- hide any content
   self:set_extmark(self:get_namespace_id("default"), 0, 0, {
@@ -526,10 +531,13 @@ function Buffer:set_header(text)
 
   fn.matchadd("NeogitFloatHeaderHighlight", [[\v\<cr\>|\<esc\>]], 100, -1, { window = winid })
 
-  -- Scroll the buffer viewport to the top so the header is visible
-  self:call(function()
-    api.nvim_input("<PageUp>")
-  end)
+  if scroll then
+    -- Log view doesn't need scroll because the top line is blank... Because it can't be a fold or the view doesn't work.
+    self:call(function()
+      local keys = vim.api.nvim_replace_termcodes("<c-u>", true, false, true)
+      vim.api.nvim_feedkeys(keys, "n", false)
+    end)
+  end
 end
 
 ---@class BufferConfig
@@ -538,6 +546,7 @@ end
 ---@field filetype string|nil
 ---@field bufhidden string|nil
 ---@field header string|nil
+---@field scroll_header boolean|nil
 ---@field buftype string|nil|boolean
 ---@field cwd string|nil
 ---@field status_column string|nil
@@ -787,7 +796,7 @@ function Buffer.create(config)
 
   if config.header then
     logger.debug("[BUFFER:" .. buffer.handle .. "] Setting header")
-    buffer:set_header(config.header)
+    buffer:set_header(config.header, config.scroll_header)
   end
 
   if config.cwd then

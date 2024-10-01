@@ -69,6 +69,14 @@ RSpec.describe "Branch Popup", :git, :nvim do
       end
 
       it "creates and checks out a new local branch when choosing a remote"
+
+      it "creates and checks out a new local branch when name doesn't match existing local branch" do
+        nvim.keys("bl")
+        nvim.keys("tmp<cr>") # Enter branch that doesn't exist
+        nvim.keys("mas<cr>") # Set base branch
+
+        expect(git.current_branch).to eq "tmp"
+      end
     end
 
     describe "Checkout recent branch" do
