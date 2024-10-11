@@ -10,6 +10,8 @@ local input = require("neogit.lib.input")
 ---@field options table
 ---@field aliases table
 ---@field short_opts table
+---@field args fun(...): table
+---@field arg_list fun(table): table
 
 ---@class NeogitGitCLI
 ---@field show GitCommand
@@ -56,6 +58,9 @@ local input = require("neogit.lib.input")
 ---@field cherry-pick GitCommand
 ---@field verify-commit GitCommand
 ---@field bisect GitCommand
+---@field git_root fun(dir: string):string
+---@field is_inside_worktree fun(dir: string):boolean
+---@field history table
 
 local function config(setup)
   setup = setup or {}
@@ -667,6 +672,7 @@ local configurations = {
 --- git_root_of_cwd() returns the git repo of the cwd, which can change anytime
 --- after git_root_of_cwd() has been called.
 ---@param dir string
+---@return string
 local function git_root(dir)
   local cmd = { "git", "-C", dir, "rev-parse", "--show-toplevel" }
   local result = vim.system(cmd, { text = true }):wait()
@@ -674,6 +680,7 @@ local function git_root(dir)
 end
 
 ---@param dir string
+---@return boolean
 local function is_inside_worktree(dir)
   local cmd = { "git", "-C", dir, "rev-parse", "--is-inside-work-tree" }
   local result = vim.system(cmd):wait()
@@ -682,41 +689,23 @@ end
 
 local history = {}
 
----@param job any
----@param hidden_text string Text to obfuscate from history
----@param hide_from_history boolean Do not show this command in GitHistoryBuffer
-local function handle_new_cmd(job, hidden_text, hide_from_history)
-  if hide_from_history == nil then
-    hide_from_history = false
-  end
-
-  table.insert(history, {
-    cmd = hidden_text and job.cmd:gsub(hidden_text, string.rep("*", #hidden_text)) or job.cmd,
-    raw_cmd = job.cmd,
-    stdout = job.stdout,
-    stderr = job.stderr,
-    code = job.code,
-    time = job.time,
-    hidden = hide_from_history,
-  })
+---@param job ProcessResult
+local function store_process_result(job)
+  table.insert(history, job)
 
   do
-    local log_fn = logger.trace
     if job.code > 0 then
-      log_fn = logger.warn
-    end
-    if job.code > 0 then
-      log_fn(
+      logger.trace(
         string.format("[CLI] Execution of '%s' failed with code %d after %d ms", job.cmd, job.code, job.time)
       )
 
       for _, line in ipairs(job.stderr) do
         if line ~= "" then
-          log_fn(string.format("[CLI] [STDERR] %s", line))
+          logger.trace(string.format("[CLI] [STDERR] %s", line))
         end
       end
     else
-      log_fn(string.format("[CLI] Execution of '%s' succeeded in %d ms", job.cmd, job.time))
+      logger.trace(string.format("[CLI] Execution of '%s' succeeded in %d ms", job.cmd, job.time))
     end
   end
 end
@@ -877,7 +866,7 @@ local function handle_line_interactive(p, line)
     handler = handle_interactive_authenticity
   elseif line:match("^Username for ") then
     handler = handle_interactive_username
-  elseif line:match("^Enter passphrase") or line:match("^Password for") then
+  elseif line:match("^Enter passphrase") or line:match("^Password for") or line:match("^Enter PIN for") then
     handler = handle_interactive_password
   end
 
@@ -962,12 +951,14 @@ local function new_builder(subcommand)
     logger.trace(string.format("[CLI]: Executing '%s': '%s'", subcommand, table.concat(cmd, " ")))
 
     return process.new {
-      input = state.input,
       cmd = cmd,
       cwd = git.repo.git_root,
       env = state.env,
-      pty = state.in_pty,
+      input = state.input,
       on_error = opts.on_error,
+      pty = state.in_pty,
+      git_hook = git.hooks.exists(subcommand) and not vim.tbl_contains(cmd, "--no-verify"),
+      suppress_console = not not (opts.hidden or opts.long),
     }
   end
 
@@ -985,6 +976,28 @@ local function new_builder(subcommand)
       opts.await = false
     end
 
+    opts.on_error = function(res)
+      -- When aborting, don't alert the user. exit(1) is expected.
+      for _, line in ipairs(res.stdout) do
+        if
+          line:match("^hint: Waiting for your editor to close the file...")
+          or line:match("error: there was a problem with the editor")
+        then
+          return false
+        end
+      end
+
+      -- When opening in a brand new repo, HEAD will cause an error.
+      if
+        res.stderr[1]
+        == "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree."
+      then
+        return false
+      end
+
+      return not opts.ignore_error
+    end
+
     return opts
   end
 
@@ -995,29 +1008,7 @@ local function new_builder(subcommand)
     to_process = to_process,
     call = function(options)
       local opts = make_options(options)
-      local p = to_process {
-        on_error = function(res)
-          -- When aborting, don't alert the user. exit(1) is expected.
-          for _, line in ipairs(res.stdout) do
-            if
-              line:match("^hint: Waiting for your editor to close the file...")
-              or line:match("error: there was a problem with the editor")
-            then
-              return false
-            end
-          end
-
-          -- When opening in a brand new repo, HEAD will cause an error.
-          if
-            res.stderr[1]
-            == "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree."
-          then
-            return false
-          end
-
-          return not opts.ignore_error
-        end,
-      }
+      local p = to_process(opts)
 
       if opts.pty then
         p.on_partial_line = function(p, line)
@@ -1047,26 +1038,24 @@ local function new_builder(subcommand)
       end
 
       if opts.await then
-        logger.debug("Running command await: " .. vim.inspect(p.cmd))
+        logger.trace("Running command await: " .. vim.inspect(p.cmd))
         run_await()
       else
-        logger.debug("Running command async: " .. vim.inspect(p.cmd))
+        logger.trace("Running command async: " .. vim.inspect(p.cmd))
         local ok, _ = pcall(run_async)
         if not ok then
-          logger.debug("Running command async failed - awaiting instead")
+          logger.trace("Running command async failed - awaiting instead")
           run_await()
         end
       end
 
       assert(result, "Command did not complete")
+      if state.hide_text then
+        result.cmd = result.cmd:gsub(state.hide_text, string.rep("*", #state.hide_text))
+      end
 
-      handle_new_cmd({
-        cmd = table.concat(p.cmd, " "),
-        stdout = result.stdout,
-        stderr = result.stderr,
-        code = result.code,
-        time = result.time,
-      }, state.hide_text, opts.hidden)
+      result.hidden = opts.hidden
+      store_process_result(result)
 
       if opts.trim then
         result:trim()
@@ -1093,7 +1082,6 @@ local meta = {
 
 local cli = setmetatable({
   history = history,
-  insert = handle_new_cmd,
   git_root = git_root,
   is_inside_worktree = is_inside_worktree,
 }, meta)

@@ -58,10 +58,14 @@ end
 
 ---@return Watcher
 function Watcher:unregister(buffer)
+  if not self.buffers[buffer:id()] then
+    return self
+  end
+  self.buffers[buffer:id()] = nil
+
   logger.debug("[WATCHER] Unregistered buffer " .. buffer:id())
 
-  self.buffers[buffer:id()] = nil
-  if vim.tbl_isempty(self.buffers) then
+  if vim.tbl_isempty(self.buffers) and self.running then
     logger.debug("[WATCHER] No registered buffers - stopping")
     self:stop()
   end
@@ -102,6 +106,7 @@ function Watcher:stop()
 end
 
 local WATCH_IGNORE = {
+  index = true,
   ORIG_HEAD = true,
   FETCH_HEAD = true,
   COMMIT_EDITMSG = true,
@@ -145,6 +150,7 @@ end
 
 function Watcher:dispatch_refresh()
   git.repo:dispatch_refresh {
+    source = "watcher",
     callback = function()
       for name, buffer in pairs(self.buffers) do
         logger.debug("[WATCHER] Dispatching redraw to " .. name)

@@ -403,7 +403,7 @@ function M.get_default_values()
       kind = "auto",
     },
     preview_buffer = {
-      kind = "floating",
+      kind = "floating_console",
     },
     popup = {
       kind = "split",
@@ -579,6 +579,7 @@ function M.get_default_values()
         ["Y"] = "YankSelected",
         ["<c-r>"] = "RefreshBuffer",
         ["<cr>"] = "GoToFile",
+        ["<s-cr>"] = "PeekFile",
         ["<c-v>"] = "VSplitOpen",
         ["<c-x>"] = "SplitOpen",
         ["<c-t>"] = "TabOpen",
@@ -586,6 +587,8 @@ function M.get_default_values()
         ["}"] = "GoToNextHunkHeader",
         ["[c"] = "OpenOrScrollUp",
         ["]c"] = "OpenOrScrollDown",
+        ["<c-k>"] = "PeekUp",
+        ["<c-j>"] = "PeekDown",
       },
     },
   }
@@ -649,6 +652,7 @@ function M.validate_config()
         "vsplit_left",
         "tab",
         "floating",
+        "floating_console",
         "replace",
         "auto",
       }, val)

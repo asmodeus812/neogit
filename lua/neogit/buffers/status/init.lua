@@ -17,6 +17,7 @@ local api = vim.api
 ---@field buffer Buffer instance
 ---@field config NeogitConfig
 ---@field root string
+---@field cwd string
 local M = {}
 M.__index = M
 
@@ -42,15 +43,26 @@ end
 
 ---@param config NeogitConfig
 ---@param root string
+---@param cwd string
 ---@return StatusBuffer
-function M.new(config, root)
+function M.new(config, root, cwd)
+  if M.instance(cwd) then
+    logger.debug("Found instance for cwd " .. cwd)
+    return M.instance(cwd)
+  end
+
   local instance = {
     config = config,
     root = root,
+    cwd = vim.fs.normalize(cwd),
     buffer = nil,
+    fold_state = nil,
+    cursor_state = nil,
+    view_state = nil,
   }
 
   setmetatable(instance, M)
+  M.register(instance, cwd)
 
   return instance
 end
@@ -68,30 +80,30 @@ function M:_action(name)
 end
 
 ---@param kind string<"floating" | "split" | "tab" | "split" | "vsplit">|nil
----@param cwd string
 ---@return StatusBuffer
-function M:open(kind, cwd)
-  if M.is_open() then
+function M:open(kind)
+  if self.buffer and self.buffer:is_visible() then
     logger.debug("[STATUS] An Instance is already open - focusing it")
-    M.instance():focus()
-    return M.instance()
+    self.buffer:focus()
+    return self
   end
-
-  M.register(self, cwd)
 
   local mappings = config.get_reversed_status_maps()
 
   self.buffer = Buffer.create {
     name = "NeogitStatus",
     filetype = "NeogitStatus",
-    cwd = cwd,
+    cwd = self.cwd,
     context_highlight = not config.values.disable_context_highlighting,
-    kind = kind or config.values.kind,
+    kind = kind or config.values.kind or "tab",
     disable_line_numbers = config.values.disable_line_numbers,
     foldmarkers = not config.values.disable_signs,
     on_detach = function()
       Watcher.instance(self.root):unregister(self)
-      vim.o.autochdir = self.prev_autochdir
+
+      if self.prev_autochdir then
+        vim.o.autochdir = self.prev_autochdir
+      end
     end,
     --stylua: ignore start
     mappings = {
@@ -169,6 +181,9 @@ function M:open(kind, cwd)
         [popups.mapping_for("StashPopup")]      = self:_action("n_stash_popup"),
         [popups.mapping_for("TagPopup")]        = self:_action("n_tag_popup"),
         [popups.mapping_for("WorktreePopup")]   = self:_action("n_worktree_popup"),
+        ["V"]                                   = function()
+          vim.cmd("norm! V")
+        end,
       },
     },
     --stylua: ignore end
@@ -178,11 +193,7 @@ function M:open(kind, cwd)
       vim.o.autochdir = false
     end,
     render = function()
-      if git.repo.state.initialized then
-        return ui.Status(git.repo.state, self.config)
-      else
-        return {}
-      end
+      return ui.Status(git.repo.state, self.config)
     end,
     ---@param buffer Buffer
     ---@param _win any
@@ -190,11 +201,6 @@ function M:open(kind, cwd)
       Watcher.instance(self.root):register(self)
       buffer:move_cursor(buffer.ui:first_section().first)
     end,
-    autocmds = {
-      ["FocusGained"] = function()
-        self:dispatch_refresh(nil, "focus_gained")
-      end,
-    },
     user_autocmds = {
       ["NeogitPushComplete"] = function()
         self:dispatch_refresh(nil, "push_complete")
@@ -225,14 +231,13 @@ end
 
 function M:close()
   if self.buffer then
+    self.fold_state = self.buffer.ui:get_fold_state()
+    self.cursor_state = self.buffer:cursor_line()
+    self.view_state = self.buffer:save_view()
+
     logger.debug("[STATUS] Closing Buffer")
     self.buffer:close()
     self.buffer = nil
-  end
-
-  Watcher.instance(self.root):unregister(self)
-  if self.prev_autochdir then
-    vim.o.autochdir = self.prev_autochdir
   end
 end
 
@@ -244,6 +249,7 @@ function M:chdir(dir)
 
   logger.debug("[STATUS] Changing Dir: " .. dir)
   vim.api.nvim_set_current_dir(dir)
+  self.cwd = dir
   self:dispatch_reset()
 end
 
@@ -257,15 +263,15 @@ end
 function M:refresh(partial, reason)
   logger.debug("[STATUS] Beginning refresh from " .. (reason or "UNKNOWN"))
 
+  -- Needs to be captured _before_ refresh because the diffs are needed, but will be changed by refreshing.
   local cursor, view
-  -- Dont store cursor for focus_gained, it causes some jank on the position restoration.
-  if self.buffer and self.buffer:is_focused() and reason ~= "focus_gained" then
+  if self.buffer and self.buffer:is_focused() then
     cursor = self.buffer.ui:get_cursor_location()
     view = self.buffer:save_view()
   end
 
   git.repo:dispatch_refresh {
-    source = "status/" .. (reason or "UNKNOWN"),
+    source = "status",
     partial = partial,
     callback = function()
       self:redraw(cursor, view)
@@ -286,7 +292,18 @@ function M:redraw(cursor, view)
   logger.debug("[STATUS] Rendering UI")
   self.buffer.ui:render(unpack(ui.Status(git.repo.state, self.config)))
 
-  if cursor and view and self.buffer:is_focused() then
+  if self.fold_state then
+    logger.debug("[STATUS] Restoring fold state")
+    self.buffer.ui:set_fold_state(self.fold_state)
+    self.fold_state = nil
+  end
+
+  if self.cursor_state and self.view_state then
+    logger.debug("[STATUS] Restoring cursor and view state")
+    self.buffer:restore_view(self.view_state, self.cursor_state)
+    self.view_state = nil
+    self.cursor_state = nil
+  elseif cursor and view then
     self.buffer:restore_view(view, self.buffer.ui:resolve_cursor_location(cursor))
   end
 end
@@ -296,7 +313,7 @@ M.dispatch_refresh = a.void(function(self, partial, reason)
 end)
 
 function M:reset()
-  logger.debug("[STATUS] Resetting repo and refreshing")
+  logger.debug("[STATUS] Resetting repo and refreshing - CWD: " .. vim.uv.cwd())
   git.repo:reset()
   self:refresh(nil, "reset")
 end

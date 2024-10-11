@@ -13,14 +13,14 @@ local status_maps = require("neogit.config").get_reversed_status_maps()
 ---@field show fun(self)
 ---@field is_visible fun(self): boolean
 ---@field append fun(self, data: string)
----@field new fun(self): ProcessBuffer
+---@field new fun(self, table): ProcessBuffer
 ---@see Buffer
 ---@see Ui
 local M = {}
 M.__index = M
 
 ---@return ProcessBuffer
----@param process Process
+---@param process ProcessOpts
 function M:new(process)
   local instance = {
     content = string.format("> %s\r\n", table.concat(process.cmd, " ")),
@@ -62,7 +62,7 @@ function M:show()
 end
 
 function M:is_visible()
-  return self.buffer and self.buffer:is_visible()
+  return self.buffer and self.buffer:is_valid() and self.buffer:is_visible()
 end
 
 function M:refresh()
@@ -94,7 +94,7 @@ end
 
 local function hide(self)
   return function()
-    self:hide()
+    self:close()
   end
 end
 

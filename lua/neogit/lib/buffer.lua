@@ -209,7 +209,7 @@ function Buffer:close(force)
   if self.kind == "tab" then
     local ok, _ = pcall(vim.cmd, "tabclose")
     if not ok then
-      vim.cmd("tabnew")
+      vim.cmd("tab sb " .. self.handle)
       vim.cmd("tabclose #")
     end
 
@@ -312,6 +312,22 @@ function Buffer:show()
       style = "minimal",
       focusable = false,
       border = "rounded",
+    })
+
+    api.nvim_win_set_cursor(content_window, { 1, 0 })
+    win = content_window
+  elseif kind == "floating_console" then
+    local content_window = api.nvim_open_win(self.handle, true, {
+      anchor = "SW",
+      relative = "editor",
+      width = vim.o.columns,
+      height = math.floor(vim.o.lines * 0.3),
+      col = 0,
+      row = vim.o.lines - 2,
+      style = "minimal",
+      focusable = false,
+      border = { "─", "─", "─", "", "", "", "", "" },
+      title = " Git Console ",
     })
 
     api.nvim_win_set_cursor(content_window, { 1, 0 })
@@ -467,6 +483,13 @@ end
 function Buffer:call(f, ...)
   local args = { ... }
   api.nvim_buf_call(self.handle, function()
+    f(unpack(args))
+  end)
+end
+
+function Buffer:win_call(f, ...)
+  local args = { ... }
+  api.nvim_win_call(self.win_handle, function()
     f(unpack(args))
   end)
 end
@@ -801,7 +824,7 @@ function Buffer.create(config)
 
   if config.cwd then
     logger.debug("[BUFFER:" .. buffer.handle .. "] Setting CWD to: " .. config.cwd)
-    buffer:win_exec("lcd " .. config.cwd)
+    buffer:win_exec("lcd " .. fn.fnameescape(config.cwd))
   end
 
   return buffer

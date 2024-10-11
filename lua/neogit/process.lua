@@ -16,6 +16,17 @@ local function mask_command(cmd)
   return command
 end
 
+---@class ProcessOpts
+---@field buffer ProcessBuffer|nil
+---@field cmd string[]
+---@field cwd string|nil
+---@field env table<string, string>|nil
+---@field input string|nil
+---@field on_error (fun(res: ProcessResult): boolean) Intercept the error externally, returning false prevents the error from being logged
+---@field pty boolean|nil
+---@field suppress_console boolean
+---@field git_hook boolean
+
 ---@class Process
 ---@field cmd string[]
 ---@field cwd string|nil
@@ -26,6 +37,8 @@ end
 ---@field pty boolean|nil
 ---@field buffer ProcessBuffer
 ---@field input string|nil
+---@field git_hook boolean
+---@field suppress_console boolean
 ---@field on_partial_line fun(process: Process, data: string)|nil callback on complete lines
 ---@field on_error (fun(res: ProcessResult): boolean) Intercept the error externally, returning false prevents the error from being logged
 local Process = {}
@@ -41,43 +54,39 @@ setmetatable(processes, { __mode = "k" })
 ---@field output string[]
 ---@field code number
 ---@field time number seconds
+---@field cmd string
 local ProcessResult = {}
+
+local remove_ansi_escape_codes = util.remove_ansi_escape_codes
+
+local not_blank = function(v)
+  return v ~= ""
+end
 
 ---Removes empty lines from output
 ---@return ProcessResult
 function ProcessResult:trim()
-  local BLANK = ""
-  self.stdout = vim.tbl_filter(function(v)
-    return v ~= BLANK
-  end, self.stdout)
-
-  self.stderr = vim.tbl_filter(function(v)
-    return v ~= BLANK
-  end, self.stderr)
+  self.stdout = vim.tbl_filter(not_blank, self.stdout)
+  self.stderr = vim.tbl_filter(not_blank, self.stderr)
 
   return self
 end
 
 function ProcessResult:remove_ansi()
-  local remove_ansi_escape_codes = util.remove_ansi_escape_codes
-  self.stdout = vim.tbl_map(function(v)
-    return remove_ansi_escape_codes(v)
-  end, self.stdout)
-
-  self.stderr = vim.tbl_map(function(v)
-    return remove_ansi_escape_codes(v)
-  end, self.stderr)
+  self.stdout = vim.tbl_map(remove_ansi_escape_codes, self.stdout)
+  self.stderr = vim.tbl_map(remove_ansi_escape_codes, self.stderr)
 
   return self
 end
 
 ProcessResult.__index = ProcessResult
 
----@param process Process
+---@param process ProcessOpts
 ---@return Process
 function Process.new(process)
   process.buffer = require("neogit.buffers.process"):new(process)
-  return setmetatable(process, Process)
+
+  return setmetatable(process, Process) ---@class Process
 end
 
 local hide_console = false
@@ -91,12 +100,17 @@ function Process.hide_preview_buffers()
 end
 
 function Process:start_timer()
+  if self.suppress_console then
+    return
+  end
+
   if self.timer == nil then
     local timer = vim.loop.new_timer()
     self.timer = timer
 
+    local timeout = assert(self.git_hook and 100 or config.values.console_timeout, "no timeout")
     timer:start(
-      config.values.console_timeout,
+      timeout,
       0,
       vim.schedule_wrap(function()
         if not self.timer then
@@ -229,6 +243,7 @@ function Process:spawn(cb)
     stdout = {},
     stderr = {},
     output = {},
+    cmd = table.concat(self.cmd, " "),
   }, ProcessResult)
 
   assert(self.job == nil, "Process started twice")
@@ -248,14 +263,18 @@ function Process:spawn(cb)
 
   local stdout_on_line = function(line)
     insert(res.stdout, line)
-    self.buffer:append(line)
+    if not self.suppress_console then
+      self.buffer:append(line)
+    end
   end
 
   local stderr_on_partial = function() end
 
   local stderr_on_line = function(line)
     insert(res.stderr, line)
-    self.buffer:append(line)
+    if not self.suppress_console then
+      self.buffer:append(line)
+    end
   end
 
   local on_stdout, stdout_cleanup = handle_output(stdout_on_partial, stdout_on_line)
@@ -273,23 +292,25 @@ function Process:spawn(cb)
     stdout_cleanup()
     stderr_cleanup()
 
-    self.buffer:append(string.format("Process exited with code: %d", code))
+    if not self.suppress_console then
+      self.buffer:append(string.format("Process exited with code: %d", code))
 
-    if not self.buffer:is_visible() and code > 0 and self.on_error(res) then
-      local output = {}
-      local start = math.max(#res.stderr - 16, 1)
-      for i = start, math.min(#res.stderr, start + 16) do
-        insert(output, "> " .. util.remove_ansi_escape_codes(res.stderr[i]))
+      if not self.buffer:is_visible() and code > 0 and self.on_error(res) then
+        local output = {}
+        local start = math.max(#res.stderr - 16, 1)
+        for i = start, math.min(#res.stderr, start + 16) do
+          insert(output, "> " .. util.remove_ansi_escape_codes(res.stderr[i]))
+        end
+
+        local message =
+          string.format("%s:\n\n%s", mask_command(table.concat(self.cmd, " ")), table.concat(output, "\n"))
+
+        notification.warn(message)
       end
 
-      local message =
-        string.format("%s:\n\n%s", mask_command(table.concat(self.cmd, " ")), table.concat(output, "\n"))
-
-      notification.warn(message)
-    end
-
-    if config.values.auto_close_console and self.buffer:is_visible() and code == 0 then
-      self.buffer:close()
+      if config.values.auto_close_console and self.buffer:is_visible() and code == 0 then
+        self.buffer:close()
+      end
     end
 
     self.stdin = nil
@@ -333,9 +354,11 @@ function Process:spawn(cb)
     logger.debug("Sending input:" .. vim.inspect(self.input))
     self:send(self.input)
 
-    -- NOTE: rebase/reword doesn't want/need this
+    -- NOTE: rebase/reword doesn't want/need this, so don't send EOT if the last character is a dash
     -- Include EOT, otherwise git-apply will not work as expects the stream to end
-    self:send("\04")
+    if not self.cmd[#self.cmd] == "-" then
+      self:send("\04")
+    end
     self:close_stdin()
   end
 

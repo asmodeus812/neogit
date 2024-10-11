@@ -62,10 +62,6 @@ function M.setup(opts)
     end
   end
 
-  -- TODO ?
-  -- M.refresh_viml_compat = M.status.refresh_viml_compat
-  -- M.refresh_manually = M.status.refresh_manually
-
   M.lib = require("neogit.lib")
   M.cli = M.lib.git.cli
   M.popups = require("neogit.popups")
@@ -115,7 +111,7 @@ local function open_status_buffer(opts)
   -- going to open into. We will use vim.fn.lcd() in the status buffer constructor, so this will eventually be
   -- correct.
   local repo = require("neogit.lib.git.repository").instance(opts.cwd)
-  status.new(config.values, repo.git_root):open(opts.kind, opts.cwd):dispatch_refresh()
+  status.new(config.values, repo.git_root, opts.cwd):open(opts.kind):dispatch_refresh()
 end
 
 ---@alias Popup

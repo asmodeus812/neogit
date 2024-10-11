@@ -135,6 +135,10 @@ function M.edit()
   return rebase_command(git.cli.rebase.edit_todo)
 end
 
+function M.abort()
+  return rebase_command(git.cli.rebase.abort)
+end
+
 ---Find the merge base for HEAD and it's upstream
 ---@return string|nil
 function M.merge_base_HEAD()
@@ -204,7 +208,7 @@ function M.update_rebase_status(state)
       return
     end
 
-    head = head:read()
+    head = vim.trim(head:read())
     state.rebase.head = head:match("refs/heads/([^\r\n]+)")
     state.rebase.head_oid = git.rev_parse.verify(head)
 
