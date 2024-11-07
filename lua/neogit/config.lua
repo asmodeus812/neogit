@@ -79,10 +79,16 @@ function M.get_user_mappings(set)
 end
 
 ---@alias WindowKind
+---| "replace" Like :enew
+---| "tab" Open in a new tab
 ---| "split" Open in a split
+---| "split_above" Like :top split
+---| "split_above_all" Like :top split
+---| "split_below" Like :below split
+---| "split_below_all" Like :below split
 ---| "vsplit" Open in a vertical split
 ---| "floating" Open in a floating window
----| "tab" Open in a new tab
+---| "auto" vsplit if window would have 80 cols, otherwise split
 
 ---@class NeogitCommitBufferConfig Commit buffer options
 ---@field kind WindowKind The type of window that should be opened
@@ -129,9 +135,32 @@ end
 ---@field bisect NeogitConfigSection|nil
 
 ---@class HighlightOptions
----@field italic? boolean
----@field bold? boolean
----@field underline? boolean
+---@field italic?     boolean
+---@field bold?       boolean
+---@field underline?  boolean
+---@field bg0?        string  Darkest background color
+---@field bg1?        string  Second darkest background color
+---@field bg2?        string  Second lightest background color
+---@field bg3?        string  Lightest background color
+---@field grey?       string  middle grey shade for foreground
+---@field white?      string  Foreground white (main text)
+---@field red?        string  Foreground red
+---@field bg_red?     string  Background red
+---@field line_red?   string  Cursor line highlight for red regions, like deleted hunks
+---@field orange?     string  Foreground orange
+---@field bg_orange?  string  background orange
+---@field yellow?     string  Foreground yellow
+---@field bg_yellow?  string  background yellow
+---@field green?      string  Foreground green
+---@field bg_green?   string  Background green
+---@field line_green? string  Cursor line highlight for green regions, like added hunks
+---@field cyan?       string  Foreground cyan
+---@field bg_cyan?    string  Background cyan
+---@field blue?       string  Foreground blue
+---@field bg_blue?    string  Background blue
+---@field purple?     string  Foreground purple
+---@field bg_purple?  string  Background purple
+---@field md_purple?  string  Background _medium_ purple. Lighter than bg_purple. Used for hunk headers.
 
 ---@class NeogitFilewatcherConfig
 ---@field enabled boolean
@@ -153,6 +182,7 @@ end
 ---| "MoveDown"
 ---| "MoveUp"
 ---| "OpenTree"
+---| "Command"
 ---| "Depth1"
 ---| "Depth2"
 ---| "Depth3"
@@ -248,6 +278,7 @@ end
 ---@alias NeogitGraphStyle
 ---| "ascii"
 ---| "unicode"
+---| "kitty"
 
 ---@class NeogitConfigStatusOptions
 ---@field recent_commit_count? integer The number of recent commits to display
@@ -279,6 +310,7 @@ end
 ---@field use_per_project_settings? boolean Scope persisted settings on a per-project basis
 ---@field remember_settings? boolean Whether neogit should persist flags from popups, e.g. git push flags
 ---@field sort_branches? string Value used for `--sort` for the `git branch` command
+---@field initial_branch_name? string Default for new branch name prompts
 ---@field kind? WindowKind The default type of window neogit should open in
 ---@field disable_line_numbers? boolean Whether to disable line numbers
 ---@field disable_relative_line_numbers? boolean Whether to disable line numbers
@@ -288,6 +320,7 @@ end
 ---@field status? NeogitConfigStatusOptions Status buffer options
 ---@field commit_editor? NeogitCommitEditorConfigPopup Commit editor options
 ---@field commit_select_view? NeogitConfigPopup Commit select view options
+---@field stash? NeogitConfigPopup Commit select view options
 ---@field commit_view? NeogitCommitBufferConfig Commit buffer options
 ---@field log_view? NeogitConfigPopup Log view options
 ---@field rebase_editor? NeogitConfigPopup Rebase editor options
@@ -328,17 +361,14 @@ function M.get_default_values()
       ["gitlab.com"] = "https://gitlab.com/${owner}/${repository}/merge_requests/new?merge_request[source_branch]=${branch_name}",
       ["azure.com"] = "https://dev.azure.com/${owner}/_git/${repository}/pullrequestcreate?sourceRef=${branch_name}&targetRef=${target}",
     },
-    highlight = {
-      italic = true,
-      bold = true,
-      underline = true,
-    },
+    highlight = {},
     disable_insert_on_commit = "auto",
     use_per_project_settings = true,
     remember_settings = true,
     fetch_after_checkout = false,
     sort_branches = "-committerdate",
     kind = "tab",
+    initial_branch_name = "",
     disable_line_numbers = true,
     disable_relative_line_numbers = true,
     -- The time after which an output console is shown for slow running commands
@@ -566,6 +596,7 @@ function M.get_default_values()
         ["2"] = "Depth2",
         ["3"] = "Depth3",
         ["4"] = "Depth4",
+        ["Q"] = "Command",
         ["<tab>"] = "Toggle",
         ["x"] = "Discard",
         ["s"] = "Stage",
@@ -752,6 +783,24 @@ function M.validate_config()
       validate_type(section, "section." .. section_name, "table")
       validate_type(section.folded, string.format("section.%s.folded", section_name), "boolean")
       validate_type(section.hidden, string.format("section.%s.hidden", section_name), "boolean")
+    end
+  end
+
+  local function validate_highlights()
+    if not validate_type(config.highlight, "highlight", "table") then
+      return
+    end
+
+    for field, value in ipairs(config.highlight) do
+      if field == "bold" or field == "italic" or field == "underline" then
+        validate_type(value, string.format("highlight.%s", field), "boolean")
+      else
+        validate_type(value, string.format("highlight.%s", field), "string")
+
+        if not string.match(value, "#%x%x%x%x%x%x") then
+          err("highlight", string.format("Color value is not valid CSS: %s", value))
+        end
+      end
     end
   end
 
@@ -1048,6 +1097,7 @@ function M.validate_config()
     validate_type(config.use_per_project_settings, "use_per_project_settings", "boolean")
     validate_type(config.remember_settings, "remember_settings", "boolean")
     validate_type(config.sort_branches, "sort_branches", "string")
+    validate_type(config.initial_branch_name, "initial_branch_name", "string")
     validate_type(config.notification_icon, "notification_icon", "string")
     validate_type(config.console_timeout, "console_timeout", "number")
     validate_kind(config.kind, "kind")
@@ -1111,6 +1161,7 @@ function M.validate_config()
     validate_sections()
     validate_ignored_settings()
     validate_mappings()
+    validate_highlights()
   end
 
   return errors

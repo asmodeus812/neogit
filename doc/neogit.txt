@@ -113,6 +113,7 @@ TODO: Detail what these do
     fetch_after_checkout = false,
     auto_refresh = true,
     sort_branches = "-committerdate",
+    initial_branch_name = "",
     kind = "tab",
     disable_line_numbers = true,
     -- The time after which an output console is shown for slow running commands
@@ -330,6 +331,7 @@ The following mappings can all be customized via the setup function.
 
       status = {
         ["q"]     = "Close",
+        ["Q"]     = "Command",
         ["I"]     = "InitRepo",
         ["1"]     = "Depth1",
         ["2"]     = "Depth2",
@@ -369,12 +371,54 @@ The following mappings can all be customized via the setup function.
                                                              *:NeogitResetState*
 :NeogitResetState       Performs a full reset of saved flags for all popups.
 
+                                                                    *:NeogitLog*
+:NeogitLog              Opens log buffer for any changes to the current file,
+                        or a path the user has specified. Optionally, a range
+                        can be specified to further filter the log entries.
+
+                                                                 *:NeogitCommit*
+:NeogitCommit           Opens the commit view for the specified SHA, or `HEAD`
+                        if left blank.
+
 ==============================================================================
 4. Events                                                        *neogit_events*
 (TODO)
 
 ==============================================================================
 5. Highlights                                                *neogit_highlights*
+
+To provide a custom color palette directly to the plugin, you can use the
+`config.highlight` table with the following signature:
+
+---@class HighlightOptions
+---@field italic?     boolean
+---@field bold?       boolean
+---@field underline?  boolean
+---@field bg0?        string  Darkest background color
+---@field bg1?        string  Second darkest background color
+---@field bg2?        string  Second lightest background color
+---@field bg3?        string  Lightest background color
+---@field grey?       string  middle grey shade for foreground
+---@field white?      string  Foreground white (main text)
+---@field red?        string  Foreground red
+---@field bg_red?     string  Background red
+---@field line_red?   string  Cursor line highlight for red regions
+---@field orange?     string  Foreground orange
+---@field bg_orange?  string  background orange
+---@field yellow?     string  Foreground yellow
+---@field bg_yellow?  string  background yellow
+---@field green?      string  Foreground green
+---@field bg_green?   string  Background green
+---@field line_green? string  Cursor line highlight for green regions
+---@field cyan?       string  Foreground cyan
+---@field bg_cyan?    string  Background cyan
+---@field blue?       string  Foreground blue
+---@field bg_blue?    string  Background blue
+---@field purple?     string  Foreground purple
+---@field bg_purple?  string  Background purple
+---@field md_purple?  string  Background medium purple
+
+The following highlight groups will all be derived from this palette.
 
 The following highlight groups are defined by this plugin. If you set any of
 these yourself before the plugin loads, that will be respected. If they do not
@@ -1041,7 +1085,44 @@ Actions:                                           *neogit_commit_popup_actions*
 ==============================================================================
 Diff Popup                                                   *neogit_diff_popup*
 
-(TODO)
+The diff popup actions allow inspection of changes in the index (staged
+changes), the working tree (unstaged changes and untracked files), any
+ref range.
+
+For these actions to become available, Neogit needs to be configured to enable
+`diffview.nvim` integration. See |neogit_setup_plugin| and
+https://github.com/sindrets/diffview.nvim.
+
+  • Diff this                                                 *neogit_diff_this*
+    Show the diff for the file referred to by a hunk under the cursor.
+
+  • Diff range                                               *neogit_diff_range*
+    View a diff between a specified range of commits. Neogit presents a select
+    for an `A` and a `B` ref and allows specifying the type of range.
+
+    A two-dot range `A..B` shows all of the commits that `B` has that `A`
+    doesn't have. A three-dot range `A...B` shows all of the commits that `A`
+    and `B` have independently, excluding the commits shared by both refs.
+
+
+  • Diff paths                                               *neogit_diff_paths*
+    (Not yet implemented)
+
+  • Diff unstaged                                         *neogit_diff_unstaged*
+    Show the diff for the working tree, without untracked files.
+
+  • Diff staged                                             *neogit_diff_staged*
+    Show the diff for the index.
+
+  • Diff worktree                                         *neogit_diff_worktree*
+    Show the full diff of the working tree, including untracked files.
+
+  • Show commit                                             *neogit_show_commit*
+    Display the diff of the commits within a branch.
+
+  • Show stash                                               *neogit_show_stash*
+    Display the diff of a specific stash.
+
 
 ==============================================================================
 Fetch Popup                                                 *neogit_fetch_popup*
@@ -1522,8 +1603,10 @@ Actions:                                            *neogit_reset_popup_actions*
 
   • Hard                                                     *neogit_reset_hard*
     Resets the index and working tree. Any changes to tracked files in the
-    working tree since <commit> are discarded. Any untracked files or
-    directories in the way of writing any tracked files are simply deleted.
+    working tree since <commit> are discarded, however a reflog entry will be
+    created with their current state, so changes can be restored if needed.
+    Any untracked files or directories in the way of writing any tracked files
+    are simply deleted.
 
   • Keep                                                     *neogit_reset_keep*
     Resets index entries and updates files in the working tree that are
@@ -1542,7 +1625,68 @@ Actions:                                            *neogit_reset_popup_actions*
 ==============================================================================
 Stash Popup                                                 *neogit_stash_popup*
 
-(TODO)
+The stash popup actions will affect the current index (staged changes) and the
+working tree (unstaged changes and untracked files). When the cursor is on a
+stash in the stash list, actions under the "Use" column (pop, apply and drop)
+will affect the stash under the cursor.
+
+Actions:                                            *neogit_stash_popup_actions*
+  • Stash both                                               *neogit_stash_both*
+    Stash both the index and the working tree.
+
+  • Stash index                                             *neogit_stash_index*
+    Stash the index only, excluding unstaged changes and untracked files.
+
+  • Stash worktree                                       *neogit_stash_worktree*
+    (Not yet implemented)
+
+  • Stash keeping index                             *neogit_stash_keeping_index*
+    Stash both the index and the working tree, but still leave behind the
+    index.
+
+  • Stash push                                               *neogit_stash_push*
+    Select a changed file to push it to the stash.
+
+  • Snapshot both                                         *neogit_snapshot_both*
+    (Not yet implemented)
+
+  • Snapshot index                                       *neogit_snapshot_index*
+    (Not yet implemented)
+
+  • Snapshot worktree                                 *neogit_snapshot_worktree*
+    (Not yet implemented)
+
+  • Snapshot to wip ref                             *neogit_snapshot_to_wip_ref*
+    (Not yet implemented)
+
+  • Pop                                                       *neogit_stash_pop*
+    Apply a stash to the working tree. If there are conflicts, leave the stash
+    intact. If there aren't any conflicts, remove the stash from the list.
+
+  • Apply                                                   *neogit_stash_apply*
+    Apply a stash to the working tree without removing it from the stash list.
+
+  • Drop                                                     *neogit_stash_drop*
+    Remove a stash from the stash list.
+
+  • List                                                     *neogit_stash_list*
+    Display the list of all stashes, and show a diff if a stash is selected.
+
+  • Show                                                     *neogit_stash_show*
+    (Not yet implemented)
+
+  • Branch                                                 *neogit_stash_branch*
+    (Not yet implemented)
+
+  • Branch here                                       *neogit_stash_branch_here*
+    (Not yet implemented)
+
+  • Rename                                                 *neogit_stash_rename*
+    Rename an existing stash.
+
+  • Format patch                                     *neogit_stash_format_patch*
+    (Not yet implemented)
+
 
 ==============================================================================
 Ignore Popup                                               *neogit_ignore_popup*

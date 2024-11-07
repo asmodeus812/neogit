@@ -97,6 +97,7 @@ function M:open(kind)
     context_highlight = not config.values.disable_context_highlighting,
     kind = kind or config.values.kind or "tab",
     disable_line_numbers = config.values.disable_line_numbers,
+    disable_relative_line_numbers = config.values.disable_relative_line_numbers,
     foldmarkers = not config.values.disable_signs,
     on_detach = function()
       Watcher.instance(self.root):unregister(self)
@@ -133,6 +134,7 @@ function M:open(kind)
         [popups.mapping_for("WorktreePopup")]   = self:_action("v_worktree_popup"),
       },
       n = {
+        [mappings["Command"]]                   = self:_action("n_command"),
         [mappings["OpenTree"]]                  = self:_action("n_open_tree"),
         [mappings["MoveDown"]]                  = self:_action("n_down"),
         [mappings["MoveUp"]]                    = self:_action("n_up"),

@@ -1,74 +1,379 @@
-local logger = require("neogit.logger")
 local git = require("neogit.lib.git")
 local process = require("neogit.process")
 local util = require("neogit.lib.util")
 local Path = require("plenary.path")
-local input = require("neogit.lib.input")
+local runner = require("neogit.runner")
+
+---@class GitCommandSetup
+---@field flags table|nil
+---@field options table|nil
+---@field aliases table|nil
+---@field short_opts table|nil
 
 ---@class GitCommand
 ---@field flags table
 ---@field options table
 ---@field aliases table
 ---@field short_opts table
----@field args fun(...): table
----@field arg_list fun(table): table
+
+---@class GitCommandBuilder
+---@field args fun(...): self appends all params to cli as argument
+---@field arguments fun(...): self alias for `args`
+---@field arg_list fun(table): self unpacks table and uses items as cli arguments
+---@field files fun(...): self any filepaths to append to the cli call
+---@field paths fun(...): self alias for `files`
+---@field input fun(string): self string to send to process via STDIN
+---@field stdin fun(string): self alias for `input`
+---@field prefix fun(string): self prefix for CLI call
+---@field env fun(table): self key/value pairs to set as ENV variables for process
+---@field in_pty fun(boolean): self should this be run in a PTY or not?
+---@field call fun(CliCallOptions): ProcessResult
+
+---@class CliCallOptions
+---@field hidden boolean Is the command hidden from user?
+---@field trim boolean remove blank lines from output?
+---@field remove_ansi boolean remove ansi escape-characters from output?
+---@field await boolean run synchronously if true
+---@field long boolean is the command expected to be long running? (like git bisect, commit, rebase, etc)
+---@field pty boolean run command in PTY?
+---@field on_error fun(res: ProcessResult): boolean function to call if the process exits with status > 0. Used to
+---                                                 determine how to handle the error, if user should be alerted or not
+
+---@class GitCommandShow: GitCommandBuilder
+---@field stat self
+---@field oneline self
+---@field no_patch self
+---@field format fun(string): self
+---@field file fun(name: string, rev: string|nil): self
+
+---@class GitCommandNameRev: GitCommandBuilder
+---@field name_only self
+---@field no_undefined self
+---@field refs fun(string): self
+---@field exclude fun(string): self
+
+---@class GitCommandInit: GitCommandBuilder
+
+---@class GitCommandCheckoutIndex: GitCommandBuilder
+---@field all self
+---@field force self
+
+---@class GitCommandWorktree: GitCommandBuilder
+---@field add self
+---@field list self
+---@field move self
+---@field remove self
+
+---@class GitCommandRm: GitCommandBuilder
+---@field cached self
+
+---@class GitCommandStatus: GitCommandBuilder
+---@field short self
+---@field branch self
+---@field verbose self
+---@field null_separated self
+---@field porcelain fun(string): self
+
+---@class GitCommandLog: GitCommandBuilder
+---@field oneline self
+---@field branches self
+---@field remotes self
+---@field all self
+---@field graph self
+---@field color self
+---@field pretty fun(string): self
+---@field max_count fun(string): self
+---@field format fun(string): self
+
+---@class GitCommandConfig: GitCommandBuilder
+---@field _local self
+---@field global self
+---@field list self
+---@field _get self PRIVATE - use alias
+---@field _add self PRIVATE - use alias
+---@field _unset self PRIVATE - use alias
+---@field null self
+---@field set fun(key: string, value: string): self
+---@field unset fun(key: string): self
+---@field get fun(path: string): self
+
+---@class GitCommandDescribe: GitCommandBuilder
+---@field long self
+---@field tags self
+
+---@class GitCommandDiff: GitCommandBuilder
+---@field cached self
+---@field stat self
+---@field shortstat self
+---@field patch self
+---@field name_only self
+---@field ext_diff self
+---@field index self
+---@field check self
+
+---@class GitCommandStash: GitCommandBuilder
+---@field apply self
+---@field drop self
+---@field push self
+---@field store self
+---@field index self
+---@field staged self
+---@field keep_index self
+---@field message fun(text: string): self
+
+---@class GitCommandTag: GitCommandBuilder
+---@field n self
+---@field list self
+---@field delete self
+
+---@class GitCommandRebase: GitCommandBuilder
+---@field interactive self
+---@field onto self
+---@field todo self
+---@field continue self
+---@field abort self
+---@field skip self
+---@field autosquash self
+---@field autostash self
+---@field commit fun(rev: string): self
+
+---@class GitCommandMerge: GitCommandBuilder
+---@field continue self
+---@field abort self
+
+---@class GitCommandMergeBase: GitCommandBuilder
+---@field is_ancestor self
+
+---@class GitCommandReset: GitCommandBuilder
+---@field hard self
+---@field mixed self
+---@field soft self
+---@field keep self
+---@field merge self
+
+---@class GitCommandCheckout: GitCommandBuilder
+---@field b fun(): self
+---@field _track self PRIVATE - use alias
+---@field detach self
+---@field ours self
+---@field theirs self
+---@field merge self
+---@field track fun(branch: string): self
+---@field rev fun(rev: string): self
+---@field branch fun(branch: string): self
+---@field commit fun(commit: string): self
+---@field new_branch fun(new_branch: string): self
+---@field new_branch_with_start_point fun(branch: string, start_point: string): self
+
+---@class GitCommandRemote: GitCommandBuilder
+---@field push self
+---@field add self
+---@field rm self
+---@field rename self
+---@field prune self
+---@field get_url fun(remote: string): self
+
+---@class GitCommandApply: GitCommandBuilder
+---@field ignore_space_change self
+---@field cached self
+---@field reverse self
+---@field index self
+---@field with_patch fun(string): self alias for input
+
+---@class GitCommandAdd: GitCommandBuilder
+---@field update self
+---@field all self
+
+---@class GitCommandAbsorb: GitCommandBuilder
+---@field verbose self
+---@field and_rebase self
+---@field base fun(commit: string): self
+
+---@class GitCommandCommit: GitCommandBuilder
+---@field all self
+---@field no_verify self
+---@field amend self
+---@field only self
+---@field dry_run self
+---@field no_edit self
+---@field edit self
+---@field allow_empty self
+---@field with_message fun(message: string): self Passes message via STDIN
+---@field message fun(message: string): self Passes message via CLI
+
+---@class GitCommandPush: GitCommandBuilder
+---@field delete self
+---@field remote fun(remote: string): self
+---@field to fun(to: string): self
+
+---@class GitCommandPull: GitCommandBuilder
+---@field no_commit self
+
+---@class GitCommandCherry: GitCommandBuilder
+---@field verbose self
+
+---@class GitCommandBranch: GitCommandBuilder
+---@field all self
+---@field delete self
+---@field remotes self
+---@field force self
+---@field current self
+---@field edit_description self
+---@field very_verbose self
+---@field move self
+---@field sort fun(sort: string): self
+---@field name fun(name: string): self
+
+---@class GitCommandFetch: GitCommandBuilder
+---@field recurse_submodules self
+---@field verbose self
+---@field jobs fun(n: number): self
+
+---@class GitCommandReadTree: GitCommandBuilder
+---@field merge self
+---@field index_output fun(path: string): self
+---@field tree fun(tree: string): self
+
+---@class GitCommandWriteTree: GitCommandBuilder
+
+---@class GitCommandCommitTree: GitCommandBuilder
+---@field no_gpg_sign self
+---@field parent fun(parent: string): self
+---@field message fun(message: string): self
+---@field parents fun(...): self
+---@field tree fun(tree: string): self
+
+---@class GitCommandUpdateIndex: GitCommandBuilder
+---@field add self
+---@field remove self
+---@field refresh self
+
+---@class GitCommandShowRef: GitCommandBuilder
+---@field verify self
+
+---@class GitCommandShowBranch: GitCommandBuilder
+---@field all self
+
+---@class GitCommandReflog: GitCommandBuilder
+---@field show self
+---@field format fun(format: string): self
+---@field date fun(mode: string): self
+
+---@class GitCommandUpdateRef: GitCommandBuilder
+---@field create_reflog self
+---@field message fun(text: string): self
+
+---@class GitCommandLsFiles: GitCommandBuilder
+---@field others self
+---@field deleted self
+---@field modified self
+---@field cached self
+---@field deduplicate self
+---@field exclude_standard self
+---@field full_name self
+---@field error_unmatch self
+
+---@class GitCommandLsTree: GitCommandBuilder
+---@field full_tree self
+---@field name_only self
+---@field recursive self
+
+---@class GitCommandLsRemote: GitCommandBuilder
+---@field tags self
+---@field remote fun(remote: string): self
+
+---@class GitCommandForEachRef: GitCommandBuilder
+---@field format self
+---@field sort self
+
+---@class GitCommandRevList: GitCommandBuilder
+---@field merges self
+---@field parents self
+---@field max_count fun(n: number): self
+
+---@class GitCommandRevParse: GitCommandBuilder
+---@field verify self
+---@field quiet self
+---@field short self
+---@field revs_only self
+---@field no_revs self
+---@field flags self
+---@field no_flags self
+---@field symbolic self
+---@field symbolic_full_name self
+---@field abbrev_ref fun(ref: string): self
+
+---@class GitCommandCherryPick: GitCommandBuilder
+---@field no_commit self
+---@field continue self
+---@field skip self
+---@field abort self
+
+---@class GitCommandVerifyCommit: GitCommandBuilder
+
+---@class GitCommandBisect: GitCommandBuilder
 
 ---@class NeogitGitCLI
----@field show GitCommand
----@field name-rev GitCommand
----@field init GitCommand
----@field checkout-index GitCommand
----@field worktree GitCommand
----@field rm GitCommand
----@field status GitCommand
----@field log GitCommand
----@field config GitCommand
----@field describe GitCommand
----@field diff GitCommand
----@field stash GitCommand
----@field tag GitCommand
----@field rebase GitCommand
----@field merge GitCommand
----@field merge-base GitCommand
----@field reset GitCommand
----@field checkout GitCommand
----@field remote GitCommand
----@field apply GitCommand
----@field add GitCommand
----@field absorb GitCommand
----@field commit GitCommand
----@field push GitCommand
----@field pull GitCommand
----@field cherry GitCommand
----@field branch GitCommand
----@field fetch GitCommand
----@field read-tree GitCommand
----@field write-tree GitCommand
----@field commit-tree GitCommand
----@field update-index GitCommand
----@field show-ref GitCommand
----@field show-branch GitCommand
----@field update-ref GitCommand
----@field ls-files GitCommand
----@field ls-tree GitCommand
----@field ls-remote GitCommand
----@field for-each-ref GitCommand
----@field rev-list GitCommand
----@field rev-parse GitCommand
----@field cherry-pick GitCommand
----@field verify-commit GitCommand
----@field bisect GitCommand
+---@field absorb         GitCommandAbsorb
+---@field add            GitCommandAdd
+---@field apply          GitCommandApply
+---@field bisect         GitCommandBisect
+---@field branch         GitCommandBranch
+---@field checkout       GitCommandCheckout
+---@field checkout-index GitCommandCheckoutIndex
+---@field cherry         GitCommandCherry
+---@field cherry-pick    GitCommandCherryPick
+---@field commit         GitCommandCommit
+---@field commit-tree    GitCommandCommitTree
+---@field config         GitCommandConfig
+---@field describe       GitCommandDescribe
+---@field diff           GitCommandDiff
+---@field fetch          GitCommandFetch
+---@field for-each-ref   GitCommandForEachRef
+---@field init           GitCommandInit
+---@field log            GitCommandLog
+---@field ls-files       GitCommandLsFiles
+---@field ls-remote      GitCommandLsRemote
+---@field ls-tree        GitCommandLsTree
+---@field merge          GitCommandMerge
+---@field merge-base     GitCommandMergeBase
+---@field name-rev       GitCommandNameRev
+---@field pull           GitCommandPull
+---@field push           GitCommandPush
+---@field read-tree      GitCommandReadTree
+---@field rebase         GitCommandRebase
+---@field reflog         GitCommandReflog
+---@field remote         GitCommandRemote
+---@field reset          GitCommandReset
+---@field rev-list       GitCommandRevList
+---@field rev-parse      GitCommandRevParse
+---@field rm             GitCommandRm
+---@field show           GitCommandShow
+---@field show-branch    GitCommandShowBranch
+---@field show-ref       GitCommandShowRef
+---@field stash          GitCommandStash
+---@field status         GitCommandStatus
+---@field tag            GitCommandTag
+---@field update-index   GitCommandUpdateIndex
+---@field update-ref     GitCommandUpdateRef
+---@field verify-commit  GitCommandVerifyCommit
+---@field worktree       GitCommandWorktree
+---@field write-tree     GitCommandWriteTree
 ---@field git_root fun(dir: string):string
 ---@field is_inside_worktree fun(dir: string):boolean
----@field history table
 
+---@param setup GitCommandSetup|nil
+---@return GitCommand
 local function config(setup)
   setup = setup or {}
-  setup.flags = setup.flags or {}
-  setup.options = setup.options or {}
-  setup.aliases = setup.aliases or {}
-  setup.short_opts = setup.short_opts or {}
-  return setup
+
+  local command = {}
+  command.flags = setup.flags or {}
+  command.options = setup.options or {}
+  command.aliases = setup.aliases or {}
+  command.short_opts = setup.short_opts or {}
+
+  return command
 end
 
 local configurations = {
@@ -150,13 +455,6 @@ local configurations = {
       pretty = "--pretty",
       max_count = "--max-count",
       format = "--format",
-    },
-    aliases = {
-      for_range = function(tbl)
-        return function(range)
-          return tbl.args(range)
-        end
-      end,
     },
   },
 
@@ -410,13 +708,10 @@ local configurations = {
         end
       end,
       message = function(tbl)
-        return function(text)
-          return tbl.args("-m", text)
+        return function(message)
+          return tbl.args("-m", message)
         end
       end,
-    },
-    options = {
-      commit_message_file = "--file",
     },
   },
 
@@ -442,9 +737,6 @@ local configurations = {
     flags = {
       no_commit = "--no-commit",
     },
-    pull = config {
-      flags = {},
-    },
   },
 
   cherry = config {
@@ -464,12 +756,10 @@ local configurations = {
       very_verbose = "-vv",
       move = "-m",
     },
+    options = {
+      sort = "--sort",
+    },
     aliases = {
-      list = function(tbl)
-        return function(sort)
-          return tbl.args("--sort=" .. sort)
-        end
-      end,
       name = function(tbl)
         return function(name)
           return tbl.args(name)
@@ -479,16 +769,12 @@ local configurations = {
   },
 
   fetch = config {
-    options = {
+    flags = {
       recurse_submodules = "--recurse-submodules",
       verbose = "--verbose",
     },
-    aliases = {
-      jobs = function(tbl)
-        return function(n)
-          return tbl.args("--jobs=" .. tostring(n))
-        end
-      end,
+    options = {
+      jobs = "--jobs",
     },
   },
 
@@ -578,6 +864,7 @@ local configurations = {
     aliases = {
       message = function(tbl)
         return function(text)
+          -- TODO: Is this escapement needed?
           local escaped_text, _ = text:gsub([["]], [[\"]])
           return tbl.args("-m", string.format([["%s"]], escaped_text))
         end
@@ -687,29 +974,6 @@ local function is_inside_worktree(dir)
   return result.code == 0
 end
 
-local history = {}
-
----@param job ProcessResult
-local function store_process_result(job)
-  table.insert(history, job)
-
-  do
-    if job.code > 0 then
-      logger.trace(
-        string.format("[CLI] Execution of '%s' failed with code %d after %d ms", job.cmd, job.code, job.time)
-      )
-
-      for _, line in ipairs(job.stderr) do
-        if line ~= "" then
-          logger.trace(string.format("[CLI] [STDERR] %s", line))
-        end
-      end
-    else
-      logger.trace(string.format("[CLI] Execution of '%s' succeeded in %d ms", job.cmd, job.time))
-    end
-  end
-end
-
 local k_state = {}
 local k_config = {}
 local k_command = {}
@@ -773,13 +1037,6 @@ local mt_builder = {
       end
     end
 
-    if action == "hide_text" then
-      return function(hide_text)
-        tbl[k_state].hide_text = hide_text
-        return tbl
-      end
-    end
-
     if tbl[k_config].flags[action] then
       table.insert(tbl[k_state].options, tbl[k_config].flags[action])
       return tbl
@@ -823,72 +1080,6 @@ local mt_builder = {
     return tbl.call(...)
   end,
 }
-
----@param line string
----@return string
-local function handle_interactive_authenticity(line)
-  logger.debug("[CLI]: Confirming whether to continue with unauthenticated host")
-
-  local prompt = line
-  return input.get_user_input(
-    "The authenticity of the host can't be established." .. prompt .. "",
-    { cancel = "__CANCEL__" }
-  ) or "__CANCEL__"
-end
-
----@param line string
----@return string
-local function handle_interactive_username(line)
-  logger.debug("[CLI]: Asking for username")
-
-  local prompt = line:match("(.*:?):.*")
-  return input.get_user_input(prompt, { cancel = "__CANCEL__" }) or "__CANCEL__"
-end
-
----@param line string
----@return string
-local function handle_interactive_password(line)
-  logger.debug("[CLI]: Asking for password")
-
-  local prompt = line:match("(.*:?):.*")
-  return input.get_secret_user_input(prompt, { cancel = "__CANCEL__" }) or "__CANCEL__"
-end
-
----@param p Process
----@param line string
----@return boolean
-local function handle_line_interactive(p, line)
-  line = util.remove_ansi_escape_codes(line)
-  logger.debug(string.format("Matching interactive cmd output: '%s'", line))
-
-  local handler
-  if line:match("^Are you sure you want to continue connecting ") then
-    handler = handle_interactive_authenticity
-  elseif line:match("^Username for ") then
-    handler = handle_interactive_username
-  elseif line:match("^Enter passphrase") or line:match("^Password for") or line:match("^Enter PIN for") then
-    handler = handle_interactive_password
-  end
-
-  if handler then
-    process.hide_preview_buffers()
-
-    local value = handler(line)
-    if value == "__CANCEL__" then
-      logger.debug("[CLI]: Cancelling the interactive cmd")
-      p:stop()
-    else
-      logger.debug("[CLI]: Sending user input")
-      p:send(value .. "\r\n")
-    end
-
-    process.defer_show_preview_buffers()
-    return true
-  else
-    process.defer_show_preview_buffers()
-    return false
-  end
-end
 
 local function new_builder(subcommand)
   local configuration = configurations[subcommand]
@@ -948,8 +1139,6 @@ local function new_builder(subcommand)
       cmd
     )
 
-    logger.trace(string.format("[CLI]: Executing '%s': '%s'", subcommand, table.concat(cmd, " ")))
-
     return process.new {
       cmd = cmd,
       cwd = git.repo.git_root,
@@ -959,9 +1148,11 @@ local function new_builder(subcommand)
       pty = state.in_pty,
       git_hook = git.hooks.exists(subcommand) and not vim.tbl_contains(cmd, "--no-verify"),
       suppress_console = not not (opts.hidden or opts.long),
+      user_command = false,
     }
   end
 
+  ---@return CliCallOptions
   local function make_options(options)
     local opts = vim.tbl_extend("keep", (options or {}), {
       hidden = false,
@@ -1010,62 +1201,7 @@ local function new_builder(subcommand)
       local opts = make_options(options)
       local p = to_process(opts)
 
-      if opts.pty then
-        p.on_partial_line = function(p, line)
-          if line ~= "" then
-            handle_line_interactive(p, line)
-          end
-        end
-
-        p.pty = true
-      end
-
-      local result
-      local function run_async()
-        result = p:spawn_async()
-        if options.long then
-          p:stop_timer()
-        end
-      end
-
-      local function run_await()
-        if not p:spawn() then
-          error("Failed to run command")
-          return nil
-        end
-
-        result = p:wait()
-      end
-
-      if opts.await then
-        logger.trace("Running command await: " .. vim.inspect(p.cmd))
-        run_await()
-      else
-        logger.trace("Running command async: " .. vim.inspect(p.cmd))
-        local ok, _ = pcall(run_async)
-        if not ok then
-          logger.trace("Running command async failed - awaiting instead")
-          run_await()
-        end
-      end
-
-      assert(result, "Command did not complete")
-      if state.hide_text then
-        result.cmd = result.cmd:gsub(state.hide_text, string.rep("*", #state.hide_text))
-      end
-
-      result.hidden = opts.hidden
-      store_process_result(result)
-
-      if opts.trim then
-        result:trim()
-      end
-
-      if opts.remove_ansi then
-        result:remove_ansi()
-      end
-
-      return result
+      return runner.call(p, opts)
     end,
   }, mt_builder)
 end
@@ -1081,7 +1217,7 @@ local meta = {
 }
 
 local cli = setmetatable({
-  history = history,
+  history = runner.history,
   git_root = git_root,
   is_inside_worktree = is_inside_worktree,
 }, meta)

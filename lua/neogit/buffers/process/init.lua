@@ -3,16 +3,18 @@ local config = require("neogit.config")
 local status_maps = require("neogit.config").get_reversed_status_maps()
 
 ---@class ProcessBuffer
----@field lines integer
+---@field content string[]
 ---@field truncated boolean
 ---@field buffer Buffer
 ---@field open fun(self)
 ---@field hide fun(self)
 ---@field close fun(self)
 ---@field focus fun(self)
+---@field flush_content fun(self)
 ---@field show fun(self)
 ---@field is_visible fun(self): boolean
----@field append fun(self, data: string)
+---@field append fun(self, data: string) Appends a complete line to the buffer
+---@field append_partial fun(self, data: string) Appends a partial line - for things like spinners.
 ---@field new fun(self, table): ProcessBuffer
 ---@see Buffer
 ---@see Ui
@@ -20,13 +22,12 @@ local M = {}
 M.__index = M
 
 ---@return ProcessBuffer
----@param process ProcessOpts
+---@param process Process
 function M:new(process)
   local instance = {
-    content = string.format("> %s\r\n", table.concat(process.cmd, " ")),
+    content = { string.format("> %s\r\n", table.concat(process.cmd, " ")) },
     process = process,
     buffer = nil,
-    lines = 0,
     truncated = false,
   }
 
@@ -42,6 +43,7 @@ end
 
 function M:close()
   if self.buffer then
+    self.buffer:close_terminal_channel()
     self.buffer:close()
     self.buffer = nil
   end
@@ -58,42 +60,42 @@ function M:show()
   end
 
   self.buffer:show()
-  self:refresh()
+  self:flush_content()
 end
 
 function M:is_visible()
   return self.buffer and self.buffer:is_valid() and self.buffer:is_visible()
 end
 
-function M:refresh()
-  self.buffer:chan_send(self.content)
-  self.buffer:move_cursor(self.buffer:line_count())
-end
-
 function M:append(data)
-  self.lines = self.lines + 1
-  if self.lines > 300 then
-    if not self.truncated then
-      self.content = table.concat({ self.content, "\r\n[Output too long - Truncated]" }, "\r\n")
-      self.truncated = true
-
-      if self:is_visible() then
-        self:refresh()
-      end
-    end
-
-    return
-  end
-
-  self.content = table.concat({ self.content, data }, "\r\n")
+  assert(data, "no data to append")
 
   if self:is_visible() then
-    self:refresh()
+    self:flush_content()
+    self.buffer:chan_send(data .. "\r\n")
+  else
+    table.insert(self.content, data)
   end
 end
 
-local function hide(self)
+function M:append_partial(data)
+  assert(data, "no data to append")
+
+  if self:is_visible() then
+    self.buffer:chan_send(data)
+  end
+end
+
+function M:flush_content()
+  if #self.content > 0 then
+    self.buffer:chan_send(table.concat(self.content, "\r\n") .. "\r\n")
+    self.content = {}
+  end
+end
+
+local function close(self)
   return function()
+    self.process:stop()
     self:close()
   end
 end
@@ -111,22 +113,16 @@ function M:open()
     open = false,
     buftype = false,
     kind = config.values.preview_buffer.kind,
-    on_detach = function()
-      self.buffer = nil
+    after = function(buffer)
+      buffer:open_terminal_channel()
     end,
-    autocmds = {
-      ["WinLeave"] = function()
-        pcall(self.close, self)
-      end,
-    },
     mappings = {
-      t = {
-        [status_maps["Close"]] = hide(self),
-        ["<esc>"] = hide(self),
-      },
       n = {
-        [status_maps["Close"]] = hide(self),
-        ["<esc>"] = hide(self),
+        ["<c-c>"] = function()
+          pcall(self.process.stop, self.process)
+        end,
+        [status_maps["Close"]] = close(self),
+        ["<esc>"] = close(self),
       },
     },
   }

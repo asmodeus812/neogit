@@ -15,12 +15,9 @@ local Path = require("plenary.path")
 ---@field autocmd_group number
 ---@field ui Ui
 ---@field kind string
----@field disable_line_numbers boolean
----@field disable_relative_line_numbers boolean
+---@field name string
 local Buffer = {
   kind = "split",
-  disable_line_numbers = true,
-  disable_relative_line_numbers = true,
 }
 Buffer.__index = Buffer
 
@@ -34,6 +31,7 @@ function Buffer:new(handle, win_handle)
     win_handle = win_handle,
     border = nil,
     kind = nil, -- how the buffer was opened. For more information look at the create function
+    name = nil,
     namespaces = {
       default = api.nvim_create_namespace("neogit-buffer-" .. handle),
     },
@@ -89,11 +87,13 @@ end
 ---@param view table output of Buffer:save_view()
 ---@param cursor? number
 function Buffer:restore_view(view, cursor)
-  if cursor then
-    view.lnum = math.min(fn.line("$"), cursor)
-  end
+  self:win_call(function()
+    if cursor then
+      view.lnum = math.min(fn.line("$"), cursor)
+    end
 
-  fn.winrestview(view)
+    fn.winrestview(view)
+  end)
 end
 
 function Buffer:write()
@@ -271,83 +271,102 @@ function Buffer:show()
     end
   end
 
-  local win
-  local kind = self.kind
+  ---@return integer window handle
+  local function open()
+    local win
+    if self.kind == "replace" then
+      self.old_buf = api.nvim_get_current_buf()
+      api.nvim_set_current_buf(self.handle)
+      win = api.nvim_get_current_win()
+    elseif self.kind == "tab" then
+      vim.cmd("tab sb " .. self.handle)
+      win = api.nvim_get_current_win()
+    elseif self.kind == "split" or self.kind == "split_below" then
+      win = api.nvim_open_win(self.handle, true, { split = "below" })
+    elseif self.kind == "split_above" then
+      win = api.nvim_open_win(self.handle, true, { split = "above" })
+    elseif self.kind == "split_above_all" then
+      win = api.nvim_open_win(self.handle, true, { split = "above", win = -1 })
+    elseif self.kind == "split_below_all" then
+      win = api.nvim_open_win(self.handle, true, { split = "below", win = -1 })
+    elseif self.kind == "vsplit" then
+      win = api.nvim_open_win(self.handle, true, { split = "right", vertical = true })
+    elseif self.kind == "vsplit_left" then
+      win = api.nvim_open_win(self.handle, true, { split = "left", vertical = true })
+    elseif self.kind == "floating" then
+      -- Creates the border window
+      local vim_height = vim.o.lines
+      local vim_width = vim.o.columns
 
-  if kind == "replace" then
-    self.old_buf = api.nvim_get_current_buf()
-    api.nvim_set_current_buf(self.handle)
-    win = api.nvim_get_current_win()
-  elseif kind == "tab" then
-    vim.cmd("tab sb " .. self.handle)
-    win = api.nvim_get_current_win()
-  elseif kind == "split" or kind == "split_below" then
-    win = api.nvim_open_win(self.handle, true, { split = "below" })
-  elseif kind == "split_above" then
-    win = api.nvim_open_win(self.handle, true, { split = "above" })
-  elseif kind == "split_above_all" then
-    win = api.nvim_open_win(self.handle, true, { split = "above", win = -1 })
-  elseif kind == "split_below_all" then
-    win = api.nvim_open_win(self.handle, true, { split = "below", win = -1 })
-  elseif kind == "vsplit" then
-    win = api.nvim_open_win(self.handle, true, { split = "right", vertical = true })
-  elseif kind == "vsplit_left" then
-    win = api.nvim_open_win(self.handle, true, { split = "left", vertical = true })
-  elseif kind == "floating" then
-    -- Creates the border window
-    local vim_height = vim.o.lines
-    local vim_width = vim.o.columns
+      local width = math.floor(vim_width * 0.8) + 3
+      local height = math.floor(vim_height * 0.7)
+      local col = vim_width * 0.1 - 1
+      local row = vim_height * 0.15
 
-    local width = math.floor(vim_width * 0.8) + 3
-    local height = math.floor(vim_height * 0.7)
-    local col = vim_width * 0.1 - 1
-    local row = vim_height * 0.15
+      local content_window = api.nvim_open_win(self.handle, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        col = col,
+        row = row,
+        style = "minimal",
+        focusable = true,
+        border = "rounded",
+      })
 
-    local content_window = api.nvim_open_win(self.handle, true, {
-      relative = "editor",
-      width = width,
-      height = height,
-      col = col,
-      row = row,
-      style = "minimal",
-      focusable = false,
-      border = "rounded",
-    })
+      api.nvim_win_set_cursor(content_window, { 1, 0 })
+      win = content_window
+    elseif self.kind == "floating_console" then
+      local content_window = api.nvim_open_win(self.handle, true, {
+        anchor = "SW",
+        relative = "editor",
+        width = vim.o.columns,
+        height = math.floor(vim.o.lines * 0.3),
+        col = 0,
+        row = vim.o.lines - 2,
+        style = "minimal",
+        focusable = true,
+        border = { "─", "─", "─", "", "", "", "", "" },
+        title = " Git Console ",
+      })
 
-    api.nvim_win_set_cursor(content_window, { 1, 0 })
-    win = content_window
-  elseif kind == "floating_console" then
-    local content_window = api.nvim_open_win(self.handle, true, {
-      anchor = "SW",
-      relative = "editor",
-      width = vim.o.columns,
-      height = math.floor(vim.o.lines * 0.3),
-      col = 0,
-      row = vim.o.lines - 2,
-      style = "minimal",
-      focusable = false,
-      border = { "─", "─", "─", "", "", "", "", "" },
-      title = " Git Console ",
-    })
+      api.nvim_win_set_cursor(content_window, { 1, 0 })
+      win = content_window
+    elseif self.kind == "popup" then
+      -- local title, _ = self.name:gsub("^Neogit", ""):gsub("Popup$", "")
 
-    api.nvim_win_set_cursor(content_window, { 1, 0 })
-    win = content_window
+      local content_window = api.nvim_open_win(self.handle, true, {
+        anchor = "SW",
+        relative = "editor",
+        width = vim.o.columns,
+        height = math.floor(vim.o.lines * 0.3),
+        col = 0,
+        row = vim.o.lines - 2,
+        style = "minimal",
+        border = { "─", "─", "─", "", "", "", "", "" },
+        -- title = (" %s Actions "):format(title),
+        -- title_pos = "center",
+      })
+
+      api.nvim_win_set_cursor(content_window, { 1, 0 })
+      win = content_window
+    end
+
+    return win
   end
 
-  api.nvim_win_call(win, function()
-    if self.disable_line_numbers then
-      vim.cmd("setlocal nonu")
-    end
-
-    if self.disable_relative_line_numbers then
-      vim.cmd("setlocal nornu")
-    end
-  end)
+  -- With focus on a popup window, any kind of "split" buffer will crash. Floating windows cannot be split.
+  local ok, win = pcall(open)
+  if not ok then
+    self.kind = "floating"
+    win = open()
+  end
 
   -- Workaround UFO getting folds wrong.
-  local ufo, _ = pcall(require, "ufo")
-  if ufo then
-    require("ufo").detach()
+  local ok, ufo = pcall(require, "ufo")
+  if ok and type(ufo.detach) == "function" then
+    logger.debug("[BUFFER:" .. self.handle .. "] Disabling UFO for buffer")
+    ufo.detach(self.handle)
   end
 
   self.win_handle = win
@@ -495,7 +514,27 @@ function Buffer:win_call(f, ...)
 end
 
 function Buffer:chan_send(data)
-  api.nvim_chan_send(api.nvim_open_term(self.handle, {}), data)
+  assert(self.chan, "Terminal channel not open")
+  assert(data, "data cannot be nil")
+  api.nvim_chan_send(self.chan, data)
+end
+
+function Buffer:open_terminal_channel()
+  assert(self.chan == nil, "Terminal channel already open")
+
+  self.chan = api.nvim_open_term(self.handle, {})
+  assert(self.chan > 0, "Failed to open terminal channel")
+
+  self:unlock()
+  self:set_lines(0, -1, false, {})
+  self:lock()
+end
+
+function Buffer:close_terminal_channel()
+  assert(self.chan, "No terminal channel to close")
+
+  fn.chanclose(self.chan)
+  self.chan = nil
 end
 
 function Buffer:win_exec(cmd)
@@ -600,10 +639,8 @@ function Buffer.create(config)
 
   local buffer = Buffer.from_name(config.name)
 
+  buffer.name = config.name
   buffer.kind = config.kind or "split"
-  buffer.disable_line_numbers = (config.disable_line_numbers == nil) or config.disable_line_numbers
-  buffer.disable_relative_line_numbers = (config.disable_relative_line_numbers == nil)
-    or config.disable_relative_line_numbers
 
   if config.load then
     logger.debug("[BUFFER:" .. buffer.handle .. "] Loading content from file: " .. config.name)
@@ -613,7 +650,7 @@ function Buffer.create(config)
   local win
   if config.open ~= false then
     win = buffer:show()
-    logger.debug("[BUFFER:" .. buffer.handle .. "] Showing buffer in window " .. win)
+    logger.debug("[BUFFER:" .. buffer.handle .. "] Showing buffer in window " .. win .. " as " .. buffer.kind)
   end
 
   logger.debug("[BUFFER:" .. buffer.handle .. "] Setting buffer options")
@@ -674,6 +711,7 @@ function Buffer.create(config)
     buffer:set_window_option("foldlevel", 99)
     buffer:set_window_option("foldminlines", 0)
     buffer:set_window_option("foldtext", "")
+    buffer:set_window_option("foldcolumn", "0")
     buffer:set_window_option("listchars", "")
     buffer:set_window_option("list", false)
     buffer:call(function()
@@ -683,6 +721,14 @@ function Buffer.create(config)
       vim.opt_local.winhl:append("CursorLineNr:NeogitCursorLineNr")
       vim.opt_local.fillchars:append("fold: ")
     end)
+
+    if (config.disable_line_numbers == nil) or config.disable_line_numbers then
+      buffer:set_window_option("number", false)
+    end
+
+    if (config.disable_relative_line_numbers == nil) or config.disable_relative_line_numbers then
+      buffer:set_window_option("relativenumber", false)
+    end
 
     buffer:set_window_option("spell", config.spell_check or false)
     buffer:set_window_option("wrap", false)
@@ -718,7 +764,7 @@ function Buffer.create(config)
     api.nvim_buf_attach(buffer.handle, false, {
       on_detach = function()
         logger.debug("[BUFFER:" .. buffer.handle .. "] Clearing autocmd group")
-        api.nvim_del_augroup_by_id(buffer.autocmd_group)
+        pcall(api.nvim_del_augroup_by_id, buffer.autocmd_group)
       end,
     })
   end

@@ -126,6 +126,8 @@ neogit.setup {
   -- Flag description: https://git-scm.com/docs/git-branch#Documentation/git-branch.txt---sortltkeygt
   -- Sorting keys: https://git-scm.com/docs/git-for-each-ref#_options
   sort_branches = "-committerdate",
+  -- Default for new branch name prompts
+  initial_branch_name = "",
   -- Change the default way of opening neogit
   kind = "tab",
   -- Disable line numbers and relative line numbers
@@ -479,6 +481,9 @@ Neogit follows semantic versioning.
 
 See [CONTRIBUTING.md](https://github.com/NeogitOrg/neogit/blob/master/CONTRIBUTING.md) for more details.
 
-## Credit
+## Special Thanks
 
-Thank you to [kolja](https://github.com/kolja) for the Neogit Logo
+- [kolja](https://github.com/kolja) for the Neogit Logo
+- [gitgraph.nvim](https://github.com/isakbm/gitgraph.nvim) for the "kitty" git graph renderer
+- [vim-flog](https://github.com/rbong/vim-flog) for the "unicode" git graph renderer
+
