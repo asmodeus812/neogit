@@ -5,6 +5,9 @@ local config = require("neogit.config")
 local logger = require("neogit.logger")
 local util = require("neogit.lib.util")
 
+local ProcessBuffer = require("neogit.buffers.process")
+local Spinner = require("neogit.spinner")
+
 local api = vim.api
 local fn = vim.fn
 
@@ -17,7 +20,6 @@ local function mask_command(cmd)
 end
 
 ---@class ProcessOpts
----@field buffer ProcessBuffer|nil
 ---@field cmd string[]
 ---@field cwd string|nil
 ---@field env table<string, string>|nil
@@ -44,6 +46,7 @@ end
 ---@field on_partial_line fun(process: Process, data: string)|nil callback on complete lines
 ---@field on_error (fun(res: ProcessResult): boolean) Intercept the error externally, returning false prevents the error from being logged
 ---@field defer_show_preview_buffers fun(): nil
+---@field spinner Spinner|nil
 local Process = {}
 Process.__index = Process
 
@@ -75,6 +78,7 @@ function ProcessResult:trim()
   return self
 end
 
+---@return ProcessResult
 function ProcessResult:remove_ansi()
   self.stdout = vim.tbl_map(remove_ansi_escape_codes, self.stdout)
   self.stderr = vim.tbl_map(remove_ansi_escape_codes, self.stderr)
@@ -87,8 +91,6 @@ ProcessResult.__index = ProcessResult
 ---@param process ProcessOpts
 ---@return Process
 function Process.new(process)
-  process.buffer = require("neogit.buffers.process"):new(process)
-
   return setmetatable(process, Process) ---@class Process
 end
 
@@ -103,7 +105,26 @@ function Process.hide_preview_buffers()
 end
 
 function Process:show_console()
-  self.buffer:show()
+  if self.buffer then
+    self.buffer:show()
+  end
+end
+
+function Process:show_spinner()
+  if not config.values.process_spinner or self.suppress_console or self.spinner then
+    return
+  end
+
+  self.spinner = Spinner.new(mask_command(table.concat(self.cmd, " ")))
+  self.spinner:start()
+end
+
+function Process:hide_spinner()
+  if not self.spinner then
+    return
+  end
+
+  self.spinner:stop()
 end
 
 function Process:start_timer()
@@ -112,10 +133,11 @@ function Process:start_timer()
   end
 
   if self.timer == nil then
-    local timer = vim.loop.new_timer()
+    local timer = vim.uv.new_timer()
     self.timer = timer
 
     local timeout = assert(self.git_hook and 800 or config.values.console_timeout, "no timeout")
+
     timer:start(
       timeout,
       0,
@@ -130,16 +152,15 @@ function Process:start_timer()
           return
         end
 
-        if config.values.auto_show_console then
-          self:show_console()
-        else
+        if not config.values.auto_show_console then
           local message = string.format(
             "Command %q running for more than: %.1f seconds",
             mask_command(table.concat(self.cmd, " ")),
-            math.ceil((vim.loop.now() - self.start) / 100) / 10
+            math.ceil((vim.uv.now() - self.start) / 100) / 10
           )
-
           notification.warn(message .. "\n\nOpen the command history for details")
+        elseif config.values.auto_show_console_on == "output" then
+          self:show_console()
         end
       end)
     )
@@ -267,12 +288,14 @@ function Process:spawn(cb)
       self:on_partial_line(line)
     end
 
-    self.buffer:append_partial(line)
+    if self.buffer then
+      self.buffer:append_partial(line)
+    end
   end
 
   local stdout_on_line = function(line)
     insert(res.stdout, line)
-    if not self.suppress_console then
+    if self.buffer and not self.suppress_console then
       self.buffer:append(line)
     end
   end
@@ -281,7 +304,7 @@ function Process:spawn(cb)
 
   local stderr_on_line = function(line)
     insert(res.stderr, line)
-    if not self.suppress_console then
+    if self.buffer and not self.suppress_console then
       self.buffer:append(line)
     end
   end
@@ -291,17 +314,18 @@ function Process:spawn(cb)
 
   local function on_exit(_, code)
     res.code = code
-    res.time = (vim.loop.now() - start)
+    res.time = (vim.uv.now() - start)
 
     -- Remove self
     processes[self.job] = nil
     self.result = res
     self:stop_timer()
+    self:hide_spinner()
 
     stdout_cleanup()
     stderr_cleanup()
 
-    if not self.suppress_console then
+    if self.buffer and not self.suppress_console then
       self.buffer:append(string.format("Process exited with code: %d", code))
 
       if not self.buffer:is_visible() and code > 0 and self.on_error(res) then
@@ -311,10 +335,13 @@ function Process:spawn(cb)
           insert(output, "> " .. util.remove_ansi_escape_codes(res.stderr[i]))
         end
 
-        local message =
-          string.format("%s:\n\n%s", mask_command(table.concat(self.cmd, " ")), table.concat(output, "\n"))
-
-        notification.warn(message)
+        if not config.values.auto_close_console then
+          local message =
+            string.format("%s:\n\n%s", mask_command(table.concat(self.cmd, " ")), table.concat(output, "\n"))
+          notification.warn(message)
+        elseif config.values.auto_show_console_on == "error" then
+          self.buffer:show()
+        end
       end
 
       if
@@ -360,6 +387,8 @@ function Process:spawn(cb)
   self.stdin = job
 
   if not hide_console then
+    self.buffer = ProcessBuffer:new(self)
+    self:show_spinner()
     self:start_timer()
   end
 

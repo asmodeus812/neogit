@@ -120,6 +120,9 @@ TODO: Detail what these do
     console_timeout = 2000,
     -- Automatically show console if a command takes more than console_timeout milliseconds
     auto_show_console = true,
+    -- If `auto_show_console` is enabled, specify "output" (default) to show
+    -- the console always, or "error" to auto-show the console only on error
+    auto_show_console_on = "output",
     notification_icon = "󰊢",
     status = {
       recent_commit_count = 10,
@@ -296,70 +299,82 @@ The following mappings can all be customized via the setup function.
       }
 
       finder = {
-        ["<cr>"]    = "Select",
-        ["<c-c>"]   = "Close",
-        ["<esc>"]   = "Close",
-        ["<c-n>"]   = "Next",
-        ["<c-p>"]   = "Previous",
-        ["<down>"]  = "Next",
-        ["<up>"]    = "Previous",
-        ["<tab>"]   = "MultiselectToggleNext",
-        ["<s-tab>"] = "MultiselectTogglePrevious",
+        ["<cr>"]               = "Select",
+        ["<c-c>"]              = "Close",
+        ["<esc>"]              = "Close",
+        ["<c-n>"]              = "Next",
+        ["<c-p>"]              = "Previous",
+        ["<down>"]             = "Next",
+        ["<up>"]               = "Previous",
+        ["<tab>"]              = "InsertCompletion",
+        ["<space>"]            = "MultiselectToggleNext",
+        ["<s-space>"]          = "MultiselectTogglePrevious",
+        ["<c-j>"]              = "NOP",
+        ["<ScrollWheelDown>"]  = "ScrollWheelDown",
+        ["<ScrollWheelUp>"]    = "ScrollWheelUp",
+        ["<ScrollWheelLeft>"]  = "NOP",
+        ["<ScrollWheelRight>"] = "NOP",
+        ["<LeftMouse>"]        = "MouseClick",
+        ["<2-LeftMouse>"]      = "NOP",
       }
 
       popup = {
         ["?"] = "HelpPopup",
         ["A"] = "CherryPickPopup",
-        ["B"] = "BisectPopup",
-        ["b"] = "BranchPopup",
-        ["c"] = "CommitPopup",
         ["d"] = "DiffPopup",
-        ["f"] = "FetchPopup",
-        ["i"] = "IgnorePopup",
-        ["l"] = "LogPopup",
-        ["m"] = "MergePopup",
         ["M"] = "RemotePopup",
-        ["p"] = "PullPopup",
         ["P"] = "PushPopup",
-        ["r"] = "RebasePopup",
-        ["t"] = "TagPopup",
-        ["v"] = "RevertPopup",
-        ["w"] = "WorktreePopup",
         ["X"] = "ResetPopup",
         ["Z"] = "StashPopup",
+        ["i"] = "IgnorePopup",
+        ["t"] = "TagPopup",
+        ["b"] = "BranchPopup",
+        ["B"] = "BisectPopup",
+        ["w"] = "WorktreePopup",
+        ["c"] = "CommitPopup",
+        ["f"] = "FetchPopup",
+        ["l"] = "LogPopup",
+        ["m"] = "MergePopup",
+        ["p"] = "PullPopup",
+        ["r"] = "RebasePopup",
+        ["v"] = "RevertPopup",
       }
 
       status = {
-        ["q"]     = "Close",
-        ["Q"]     = "Command",
-        ["I"]     = "InitRepo",
-        ["1"]     = "Depth1",
-        ["2"]     = "Depth2",
-        ["3"]     = "Depth3",
-        ["4"]     = "Depth4",
-        ["<tab>"] = "Toggle",
-        ["x"]     = "Discard",
-        ["s"]     = "Stage",
-        ["S"]     = "StageUnstaged",
-        ["<c-s>"] = "StageAll",
-        ["u"]     = "Unstage",
-        ["U"]     = "UnstageStaged",
-        ["y"]     = "ShowRefs",
-        ["$"]     = "CommandHistory",
-        ["#"]     = "Console",
-        ["Y"]     = "YankSelected",
-        ["<c-r>"] = "RefreshBuffer",
-        ["<cr>"]  = "GoToFile",
-        ["<s-cr>"]  = "PeekFile",
-        ["<c-v>"] = "VSplitOpen",
-        ["<c-x>"] = "SplitOpen",
-        ["<c-t>"] = "TabOpen",
-        ["{"]     = "GoToPreviousHunkHeader",
-        ["}"]     = "GoToNextHunkHeader",
-        ["[c"]    = "OpenOrScrollUp",
-        ["]c"]    = "OpenOrScrollDown",
-        ["<c-k>"] = "PeekUp",
-        ["<c-j>"] = "PeekDown",
+        ["j"]      = "MoveDown",
+        ["k"]      = "MoveUp",
+        ["o"]      = "OpenTree",
+        ["q"]      = "Close",
+        ["I"]      = "InitRepo",
+        ["1"]      = "Depth1",
+        ["2"]      = "Depth2",
+        ["3"]      = "Depth3",
+        ["4"]      = "Depth4",
+        ["Q"]      = "Command",
+        ["<tab>"]  = "Toggle",
+        ["x"]      = "Discard",
+        ["s"]      = "Stage",
+        ["S"]      = "StageUnstaged",
+        ["L"]      = "StageLine",
+        ["<c-s>"]  = "StageAll",
+        ["u"]      = "Unstage",
+        ["K"]      = "Untrack",
+        ["U"]      = "UnstageStaged",
+        ["y"]      = "ShowRefs",
+        ["$"]      = "CommandHistory",
+        ["Y"]      = "YankSelected",
+        ["<c-r>"]  = "RefreshBuffer",
+        ["<cr>"]   = "GoToFile",
+        ["<s-cr>"] = "PeekFile",
+        ["<c-v>"]  = "VSplitOpen",
+        ["<c-x>"]  = "SplitOpen",
+        ["<c-t>"]  = "TabOpen",
+        ["{"]      = "GoToPreviousHunkHeader",
+        ["}"]      = "GoToNextHunkHeader",
+        ["[c"]     = "OpenOrScrollUp",
+        ["]c"]     = "OpenOrScrollDown",
+        ["<c-k>"]  = "PeekUp",
+        ["<c-j>"]  = "PeekDown",
       }
 <
 ==============================================================================
@@ -1249,7 +1264,7 @@ Arguments:                                              *neogit_pull_popup_args*
     upstream branch and the upstream branch was rebased since last fetched,
     the rebase uses that information to avoid rebasing non-local changes.
 
-    See pull.rebase, branch.<name>.rebase and branch.autoSetupRebase if you 
+    See pull.rebase, branch.<name>.rebase and branch.autoSetupRebase if you
     want to make git pull always use --rebase instead of merging.
 
     Note:
@@ -1848,6 +1863,72 @@ The following keys, in normal mode, will act on the commit under the cursor:
 • `b`    Insert breakpoint
 • `<cr>` Open current commit in Commit Buffer
 
+==============================================================================
+Custom Popups                                             *neogit_custom_popups*
+
+You can leverage Neogit's infrastructure to create your own popups and
+actions. For example, you can define actions as a function which will take the
+popup instance as it's argument:
+>lua
+    local function my_action(popup)
+      -- You can access the popup state (enabled flags) like so:
+      local cli_args = popup:get_arguments()
+
+      -- You can use Neogit's git abstraction for many common operations
+      -- local git = require("neogit.lib.git")
+
+      -- The input library provides some helpful interfaces for getting user
+      -- input
+      local input = require("neogit.lib.input")
+      local user_input = input.get_user_input("User-specified free text for the action")
+
+      vim.notify(
+        "Hello from my custom action!\n"
+        .. "CLI args: `" .. table.concat(cli_args, " ") .. "`\n"
+        .. "User input: `" .. user_input .. "`")
+    end
+
+    function create_custom_popup()
+      local popup = require("neogit.lib.popup")
+      local p = popup
+        .builder()
+        :name("NeogitMyCustomPopup")
+        -- A switch is a boolean CLI flag, like `--no-verify`
+        :switch("s", "my-switch", "My switch")
+        -- An "_if" variant exists for builder methods, that takes a boolean
+        -- as it's first argument.
+        :switch_if(true, "S", "conditional-switch", "This switch is conditional")
+        -- Options are CLI flags that have a value, like `--strategy=octopus`
+        :option("o", "my-option", "default_value", "My option", { key_prefix = "-" })
+        :new_action_group("My actions")
+        :action("a", "Some action", my_action)
+        -- Data can be stored on the popup instance via the `env`, accessible
+        -- to the action via `popup.state.env.*`
+        :env({ some_data = { "like this" } })
+        :build()
+
+      p:show()
+
+      return p
+    end
+
+  require("neogit")
+<
+
+Look at the builder APIs in `lua/neogit/lib/popup/builder.lua`, the built-in
+popups/actions in `lua/neogit/popups/*`, and the git APIs in
+`lua/neogit/lib/git` for more information (and inspiration!).
+
+To access your custom popup via a keymapping, you can include a mapping when
+calling the setup function:
+>lua
+    require("neogit").setup({
+      mappings = {
+        status = {
+          ["<leader>A"] = create_custom_popup,
+        },
+      },
+    })
+<
 ------------------------------------------------------------------------------
 vim:tw=78:ts=8:ft=help:norl:
-

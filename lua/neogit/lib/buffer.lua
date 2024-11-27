@@ -11,6 +11,7 @@ local Path = require("plenary.path")
 ---@class Buffer
 ---@field handle number
 ---@field win_handle number
+---@field header_win_handle number?
 ---@field namespaces table
 ---@field autocmd_group number
 ---@field ui Ui
@@ -156,7 +157,7 @@ function Buffer:set_text(first_line, last_line, first_col, last_col, lines)
   api.nvim_buf_set_text(self.handle, first_line, first_col, last_line, last_col, lines)
 end
 
----@param line nil|number|number[]
+---@param line nil|integer|integer[]
 function Buffer:move_cursor(line)
   if not line or not self:is_focused() then
     return
@@ -199,6 +200,10 @@ end
 function Buffer:close(force)
   if force == nil then
     force = false
+  end
+
+  if self.header_win_handle ~= nil then
+    api.nvim_win_close(self.header_win_handle, true)
   end
 
   if self.kind == "replace" then
@@ -592,6 +597,7 @@ function Buffer:set_header(text, scroll)
   vim.wo[winid].winhl = "NormalFloat:NeogitFloatHeader"
 
   fn.matchadd("NeogitFloatHeaderHighlight", [[\v\<cr\>|\<esc\>]], 100, -1, { window = winid })
+  self.header_win_handle = winid
 
   if scroll then
     -- Log view doesn't need scroll because the top line is blank... Because it can't be a fold or the view doesn't work.

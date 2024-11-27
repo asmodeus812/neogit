@@ -306,6 +306,7 @@ end
 ---@field git_services? table Templartes to use when opening a pull request for a branch
 ---@field fetch_after_checkout? boolean Perform a fetch if the newly checked out branch has an upstream or pushRemote set
 ---@field telescope_sorter? function The sorter telescope will use
+---@field process_spinner? boolean Hide/Show the process spinner
 ---@field disable_insert_on_commit? boolean|"auto" Disable automatically entering insert mode in commit dialogues
 ---@field use_per_project_settings? boolean Scope persisted settings on a per-project basis
 ---@field remember_settings? boolean Whether neogit should persist flags from popups, e.g. git push flags
@@ -316,6 +317,7 @@ end
 ---@field disable_relative_line_numbers? boolean Whether to disable line numbers
 ---@field console_timeout? integer Time in milliseconds after a console is created for long running commands
 ---@field auto_show_console? boolean Automatically show the console if a command takes longer than console_timeout
+---@field auto_show_console_on? string Specify "output" (show always; default) or "error" if `auto_show_console` enabled
 ---@field auto_close_console? boolean Automatically hide the console if the process exits with a 0 status
 ---@field status? NeogitConfigStatusOptions Status buffer options
 ---@field commit_editor? NeogitCommitEditorConfigPopup Commit editor options
@@ -349,6 +351,7 @@ function M.get_default_values()
     disable_context_highlighting = false,
     disable_signs = false,
     graph_style = "ascii",
+    process_spinner = true,
     filewatcher = {
       enabled = true,
     },
@@ -375,6 +378,9 @@ function M.get_default_values()
     console_timeout = 2000,
     -- Automatically show console if a command takes more than console_timeout milliseconds
     auto_show_console = true,
+    -- If `auto_show_console` is enabled, specify "output" (default) to show
+    -- the console always, or "error" to auto-show the console only on error
+    auto_show_console_on = "output",
     auto_close_console = true,
     notification_icon = "󰊢",
     status = {
@@ -509,6 +515,7 @@ function M.get_default_values()
       "NeogitPushPopup--force-with-lease",
       "NeogitPushPopup--force",
       "NeogitPullPopup--rebase",
+      "NeogitPullPopup--force",
       "NeogitCommitPopup--allow-empty",
     },
     mappings = {
@@ -1104,6 +1111,7 @@ function M.validate_config()
     validate_type(config.disable_line_numbers, "disable_line_numbers", "boolean")
     validate_type(config.disable_relative_line_numbers, "disable_relative_line_numbers", "boolean")
     validate_type(config.auto_show_console, "auto_show_console", "boolean")
+    validate_type(config.auto_show_console_on, "auto_show_console_on", "string")
     validate_type(config.auto_close_console, "auto_close_console", "boolean")
     if validate_type(config.status, "status", "table") then
       validate_type(config.status.show_head_commit_hash, "status.show_head_commit_hash", "boolean")

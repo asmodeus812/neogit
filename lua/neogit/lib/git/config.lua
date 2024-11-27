@@ -68,12 +68,23 @@ function ConfigEntry:update(value)
   end
 end
 
+---@return self
+function ConfigEntry:refresh()
+  if self.scope == "local" then
+    self.value = M.get_local(self.name).value
+  elseif self.scope == "global" then
+    self.value = M.get_global(self.name).value
+  end
+
+  return self
+end
+
 ---@type table<string, ConfigEntry>
 local config_cache = {}
 local cache_key = nil
 
 local function make_cache_key()
-  local stat = vim.loop.fs_stat(git.repo:git_path("config"):absolute())
+  local stat = vim.uv.fs_stat(git.repo:git_path("config"):absolute())
   if stat then
     return stat.mtime.sec
   end
@@ -109,13 +120,24 @@ end
 
 ---@return ConfigEntry
 function M.get(key)
-  return config()[key:lower()] or ConfigEntry.new(key, "", "local")
+  if M.get_local(key):is_set() then
+    return M.get_local(key)
+  elseif M.get_global(key):is_set() then
+    return M.get_global(key)
+  else
+    return ConfigEntry.new(key, "", "local")
+  end
 end
 
 ---@return ConfigEntry
 function M.get_global(key)
   local result = git.cli.config.get(key).call({ ignore_error = true }).stdout[1]
   return ConfigEntry.new(key, result, "global")
+end
+
+---@return ConfigEntry
+function M.get_local(key)
+  return config()[key:lower()] or ConfigEntry.new(key, "", "local")
 end
 
 function M.get_matching(pattern)

@@ -2,7 +2,6 @@ local PopupBuilder = require("neogit.lib.popup.builder")
 local Buffer = require("neogit.lib.buffer")
 local logger = require("neogit.logger")
 local util = require("neogit.lib.util")
-local config = require("neogit.config")
 local state = require("neogit.lib.state")
 local input = require("neogit.lib.input")
 local notification = require("neogit.lib.notification")
@@ -26,6 +25,8 @@ local ui = require("neogit.lib.popup.ui")
 ---@field buffer Buffer
 local M = {}
 
+-- Create a new popup builder
+---@return PopupBuilder
 function M.builder()
   return PopupBuilder.new(M.new)
 end
@@ -91,7 +92,7 @@ function M:close()
 end
 
 -- Toggle a switch on/off
----@param switch table
+---@param switch PopupSwitch
 ---@return nil
 function M:toggle_switch(switch)
   if switch.options then
@@ -133,8 +134,10 @@ function M:toggle_switch(switch)
     for _, var in ipairs(self.state.args) do
       if switch.incompatible[var.cli] then
         if var.type == "switch" then
+          ---@cast var PopupSwitch
           self:disable_switch(var)
         elseif var.type == "option" then
+          ---@cast var PopupOption
           self:disable_option(var)
         end
       end
@@ -142,12 +145,14 @@ function M:toggle_switch(switch)
   end
 
   -- Ensure that switches/options that depend on this one are also disabled
-  if not switch.enabled and #switch.dependant > 0 then
+  if not switch.enabled and #switch.dependent > 0 then
     for _, var in ipairs(self.state.args) do
-      if switch.dependant[var.cli] then
+      if switch.dependent[var.cli] then
         if var.type == "switch" then
+          ---@cast var PopupSwitch
           self:disable_switch(var)
         elseif var.type == "option" then
+          ---@cast var PopupOption
           self:disable_option(var)
         end
       end
@@ -156,7 +161,7 @@ function M:toggle_switch(switch)
 end
 
 -- Toggle an option on/off and set it's value
----@param option table
+---@param option PopupOption
 ---@param value? string
 ---@return nil
 function M:set_option(option, value)
@@ -165,9 +170,13 @@ function M:set_option(option, value)
     option.value = value
   elseif option.choices then
     if not option.value or option.value == "" then
+      local eventignore = vim.o.eventignore
+      vim.o.eventignore = "WinLeave"
       local choice = FuzzyFinderBuffer.new(option.choices):open_async {
         prompt_prefix = option.description,
       }
+      vim.o.eventignore = eventignore
+
       if choice then
         option.value = choice
       else
@@ -188,7 +197,7 @@ function M:set_option(option, value)
     -- If the option specifies a default value, and the user set the value to be empty, defer to default value.
     -- This is handy to prevent the user from accidentally loading thousands of log entries by accident.
     if option.default and input == "" then
-      option.value = option.default
+      option.value = tostring(option.default)
     else
       option.value = input
     end
@@ -201,22 +210,22 @@ function M:set_option(option, value)
     for _, var in ipairs(self.state.args) do
       if option.incompatible[var.cli] then
         if var.type == "switch" then
-          self:disable_switch(var)
+          self:disable_switch(var --[[@as PopupSwitch]])
         elseif var.type == "option" then
-          self:disable_option(var)
+          self:disable_option(var --[[@as PopupOption]])
         end
       end
     end
   end
 
   -- Ensure that switches/options that depend on this one are also disabled
-  if option.value and option.value ~= "" and #option.dependant > 0 then
+  if option.value and option.value ~= "" and #option.dependent > 0 then
     for _, var in ipairs(self.state.args) do
-      if option.dependant[var.cli] then
+      if option.dependent[var.cli] then
         if var.type == "switch" then
-          self:disable_switch(var)
+          self:disable_switch(var --[[@as PopupSwitch]])
         elseif var.type == "option" then
-          self:disable_option(var)
+          self:disable_option(var --[[@as PopupOption]])
         end
       end
     end
@@ -224,7 +233,7 @@ function M:set_option(option, value)
 end
 
 ---Disables a switch.
----@param switch table
+---@param switch PopupSwitch
 function M:disable_switch(switch)
   if switch.enabled then
     self:toggle_switch(switch)
@@ -234,7 +243,7 @@ end
 ---Disables an option, setting its value to "". Doesn't use the default, which
 ---is important to ensure that we don't use incompatible switches/options
 ---together.
----@param option table
+---@param option PopupOption
 function M:disable_option(option)
   if option.value and option.value ~= "" then
     self:set_option(option, "")
@@ -242,7 +251,7 @@ function M:disable_option(option)
 end
 
 -- Set a config value
----@param config table
+---@param config PopupConfig
 ---@return nil
 function M:set_config(config)
   if config.options then
@@ -262,6 +271,7 @@ function M:set_config(config)
   else
     local result = input.get_user_input(config.name, { default = config.value, cancel = config.value })
 
+    assert(result, "no input from user - what happened to the default?")
     config.value = result
     git.config.set(config.name, config.value)
   end
@@ -289,7 +299,7 @@ function M:mappings()
       ["<esc>"] = function()
         self:close()
       end,
-      ["<tab>"] = function()
+      ["<tab>"] = a.void(function()
         local component = self.buffer.ui:get_interactive_component_under_cursor()
         if not component then
           return
@@ -304,7 +314,7 @@ function M:mappings()
         end
 
         self:refresh()
-      end,
+      end),
     },
   }
 
@@ -314,8 +324,10 @@ function M:mappings()
       arg_prefixes[arg.key_prefix] = true
       mappings.n[arg.id] = a.void(function()
         if arg.type == "switch" then
+          ---@cast arg PopupSwitch
           self:toggle_switch(arg)
         elseif arg.type == "option" then
+          ---@cast arg PopupOption
           self:set_option(arg)
         end
 
@@ -403,7 +415,7 @@ function M:show()
         pcall(self.close, self)
       end,
     },
-    after = function(buf, _win)
+    after = function(buf)
       buf:set_window_option("cursorline", false)
       buf:set_window_option("list", false)
 
@@ -421,25 +433,18 @@ function M:show()
         end
       end
 
-      if
-        config.values.popup.kind == "split"
-        or config.values.popup.kind == "split_above"
-        or config.values.popup.kind == "split_above_all"
-        or config.values.popup.kind == "split_below"
-        or config.values.popup.kind == "split_below_all"
-      then
-        vim.cmd.resize(vim.fn.line("$") + 1)
+      local height = vim.fn.line("$") + 1
+      vim.cmd.resize(height)
 
-        -- We do it again because things like the BranchConfigPopup come from an async context,
-        -- but if we only do it schedule wrapped, then you can see it load at one size, and
-        -- resize a few ms later
-        vim.schedule(function()
-          if buf:is_focused() then
-            vim.cmd.resize(vim.fn.line("$") + 1)
-            buf:set_window_option("winfixheight", true)
-          end
-        end)
-      end
+      -- We do it again because things like the BranchConfigPopup come from an async context,
+      -- but if we only do it schedule wrapped, then you can see it load at one size, and
+      -- resize a few ms later
+      vim.schedule(function()
+        if buf:is_focused() then
+          vim.cmd.resize(height)
+          buf:set_window_option("winfixheight", true)
+        end
+      end)
     end,
     render = function()
       return ui.Popup(self.state)

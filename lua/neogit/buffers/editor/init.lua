@@ -10,21 +10,12 @@ local DiffViewBuffer = require("neogit.buffers.diff")
 
 local pad = util.pad_right
 
-local M = {}
-
-local filetypes = {
-  ["COMMIT_EDITMSG"] = "NeogitCommitMessage",
-  ["MERGE_MSG"] = "NeogitMergeMessage",
-  ["TAG_EDITMSG"] = "NeogitTagMessage",
-  ["EDIT_DESCRIPTION"] = "NeogitBranchDescription",
-}
-
 ---@class EditorBuffer
 ---@field filename string filename of buffer
 ---@field on_unload function callback invoked when buffer is unloaded
 ---@field show_diff boolean show the diff view or not
 ---@field buffer Buffer
----@see Buffer
+local M = {}
 
 --- Creates a new EditorBuffer
 ---@param filename string the filename of buffer
@@ -70,12 +61,9 @@ function M:open(kind)
     return message
   end
 
-  local filetype = filetypes[self.filename:match("[%u_]+$")] or "NeogitEditor"
-  logger.debug("[EDITOR] Filetype " .. filetype)
-
   self.buffer = Buffer.create {
     name = self.filename,
-    filetype = filetype,
+    filetype = "gitcommit",
     load = true,
     spell_check = config.values.commit_editor.spell_check,
     buftype = "",
@@ -96,10 +84,8 @@ function M:open(kind)
         end
       end,
     },
-    on_detach = function(buffer)
+    on_detach = function()
       logger.debug("[EDITOR] Cleaning Up")
-      pcall(vim.treesitter.stop, buffer.handle)
-
       if self.on_unload then
         logger.debug("[EDITOR] Running on_unload callback")
         self.on_unload(aborted and 1 or 0)
@@ -122,10 +108,7 @@ function M:open(kind)
         return pad(mapping[name] and mapping[name][1] or "<NOP>", padding)
       end
 
-      local comment_char = git.config.get("core.commentChar"):read()
-        or git.config.get_global("core.commentChar"):read()
-        or "#"
-
+      local comment_char = git.config.get("core.commentChar"):read() or "#"
       logger.debug("[EDITOR] Using comment character '" .. comment_char .. "'")
 
       -- stylua: ignore
@@ -169,19 +152,6 @@ function M:open(kind)
         or not disable_insert
       then
         vim.cmd(":startinsert")
-      end
-
-      -- Source runtime ftplugin
-      vim.cmd.source("$VIMRUNTIME/ftplugin/gitcommit.vim")
-
-      -- Apply syntax highlighting
-      local ok, _ = pcall(vim.treesitter.language.inspect, "gitcommit")
-      if ok then
-        logger.debug("[EDITOR] Loading treesitter for gitcommit")
-        vim.treesitter.start(buffer.handle, "gitcommit")
-      else
-        logger.debug("[EDITOR] Loading syntax for gitcommit")
-        vim.cmd.source("$VIMRUNTIME/syntax/gitcommit.vim")
       end
 
       if git.branch.current() then

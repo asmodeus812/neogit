@@ -3,7 +3,7 @@ local M = {}
 ---@generic T: any
 ---@generic U: any
 ---@param tbl T[]
----@param f fun(v: T): U
+---@param f Component|fun(v: T): U
 ---@return U[]
 function M.map(tbl, f)
   local t = {}
@@ -455,7 +455,7 @@ end
 ---@param callback function
 ---@return uv_timer_t
 local function set_timeout(timeout, callback)
-  local timer = vim.loop.new_timer()
+  local timer = vim.uv.new_timer()
 
   timer:start(timeout, 0, function()
     timer:stop()
@@ -522,7 +522,7 @@ function M.debounce_trailing(ms, fn, hash)
   return function(...)
     local id = hash and hash(...) or true
     if running[id] == nil then
-      running[id] = assert(vim.loop.new_timer())
+      running[id] = assert(vim.uv.new_timer())
     end
 
     local timer = running[id]
@@ -600,15 +600,27 @@ end
 ---@param winid integer
 ---@param force boolean
 function M.safe_win_close(winid, force)
-  local ok, err = pcall(vim.api.nvim_win_close, winid, force)
-  if not ok then
-    require("neogit.logger").error(err)
+  local success = M.try(vim.api.nvim_win_close, winid, force)
+  if not success then
     pcall(vim.cmd, "b#")
   end
 end
 
 function M.weak_table(mode)
   return setmetatable({}, { __mode = mode or "k" })
+end
+
+---@param fn fun(...): any
+---@param ...any
+---@return boolean|any
+function M.try(fn, ...)
+  local ok, result = pcall(fn, ...)
+  if not ok then
+    require("neogit.logger").error(result)
+    return false
+  else
+    return result or true
+  end
 end
 
 return M

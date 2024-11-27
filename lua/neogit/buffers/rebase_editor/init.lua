@@ -61,10 +61,7 @@ function M.new(filename, on_unload)
 end
 
 function M:open(kind)
-  local comment_char = git.config.get("core.commentChar"):read()
-    or git.config.get_global("core.commentChar"):read()
-    or "#"
-
+  local comment_char = git.config.get("core.commentChar"):read() or "#"
   local mapping = config.get_reversed_rebase_editor_maps()
   local mapping_I = config.get_reversed_rebase_editor_maps_I()
   local aborted = false
@@ -72,7 +69,7 @@ function M:open(kind)
   self.buffer = Buffer.create {
     name = self.filename,
     load = true,
-    filetype = "NeogitRebaseTodo",
+    filetype = "gitrebase",
     buftype = "",
     status_column = not config.values.disable_signs and "" or nil,
     kind = kind,
@@ -80,9 +77,7 @@ function M:open(kind)
     disable_line_numbers = config.values.disable_line_numbers,
     disable_relative_line_numbers = config.values.disable_relative_line_numbers,
     readonly = false,
-    on_detach = function(buffer)
-      pcall(vim.treesitter.stop, buffer.handle)
-
+    on_detach = function()
       if self.on_unload then
         self.on_unload(aborted and 1 or 0)
       end
@@ -130,17 +125,6 @@ function M:open(kind)
       buffer:set_lines(-1, -1, false, help_lines)
       buffer:write()
       buffer:move_cursor(1)
-
-      -- Source runtime ftplugin
-      vim.cmd.source("$VIMRUNTIME/ftplugin/gitrebase.vim")
-
-      -- Apply syntax highlighting
-      local ok, _ = pcall(vim.treesitter.language.inspect, "git_rebase")
-      if ok then
-        vim.treesitter.start(buffer.handle, "git_rebase")
-      else
-        vim.cmd.source("$VIMRUNTIME/syntax/gitrebase.vim")
-      end
     end,
     mappings = {
       i = {
