@@ -141,8 +141,9 @@ end
 
 ---@param name string
 ---@param base_branch? string
+---@return boolean
 function M.create(name, base_branch)
-  git.cli.branch.args(name, base_branch).call { await = true }
+  return git.cli.branch.args(name, base_branch).call({ await = true }).code == 0
 end
 
 function M.delete(name)
@@ -374,7 +375,7 @@ local function update_branch_information(state)
   state.head.oid = status.oid
   state.head.detached = status.detached
 
-  if status.oid ~= INITIAL_COMMIT then
+  if status.oid and status.oid ~= INITIAL_COMMIT then
     state.head.abbrev = git.rev_parse.abbreviate_commit(status.oid)
     state.head.commit_message = git.log.message(status.oid)
 
