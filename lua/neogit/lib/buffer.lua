@@ -76,6 +76,13 @@ function Buffer:clear()
   api.nvim_buf_set_lines(self.handle, 0, -1, false, {})
 end
 
+---@param fn fun()
+function Buffer:with_locked_viewport(fn)
+  local view = self:save_view()
+  self:call(fn)
+  self:restore_view(view)
+end
+
 ---@return table
 function Buffer:save_view()
   local view = fn.winsaveview()
@@ -179,7 +186,7 @@ function Buffer:move_top_line(line)
     return
   end
 
-  if vim.o.lines < vim.fn.line("$") then
+  if vim.o.lines < fn.line("$") then
     return
   end
 
@@ -207,6 +214,11 @@ function Buffer:close(force)
   end
 
   if self.kind == "replace" then
+    if self.old_cwd then
+      api.nvim_set_current_dir(self.old_cwd)
+      self.old_cwd = nil
+    end
+
     api.nvim_buf_delete(self.handle, { force = force })
     return
   end
@@ -242,6 +254,11 @@ function Buffer:hide()
     vim.cmd("silent! 1only")
     vim.cmd("try | tabn # | catch /.*/ | tabp | endtry")
   elseif self.kind == "replace" then
+    if self.old_cwd then
+      api.nvim_set_current_dir(self.old_cwd)
+      self.old_cwd = nil
+    end
+
     if self.old_buf and api.nvim_buf_is_loaded(self.old_buf) then
       api.nvim_set_current_buf(self.old_buf)
       self.old_buf = nil
@@ -281,6 +298,7 @@ function Buffer:show()
     local win
     if self.kind == "replace" then
       self.old_buf = api.nvim_get_current_buf()
+      self.old_cwd = vim.uv.cwd()
       api.nvim_set_current_buf(self.handle)
       win = api.nvim_get_current_win()
     elseif self.kind == "tab" then
@@ -565,6 +583,14 @@ function Buffer:line_count()
   return api.nvim_buf_line_count(self.handle)
 end
 
+function Buffer:resize_header()
+  if not self.header_win_handle then
+    return
+  end
+
+  api.nvim_win_set_width(self.header_win_handle, fn.winwidth(self.win_handle))
+end
+
 ---@param text string
 ---@param scroll boolean
 function Buffer:set_header(text, scroll)
@@ -585,7 +611,8 @@ function Buffer:set_header(text, scroll)
   -- Display the buffer in a floating window
   local winid = api.nvim_open_win(buf, false, {
     relative = "win",
-    width = vim.o.columns,
+    win = self.win_handle,
+    width = fn.winwidth(self.win_handle),
     height = 1,
     row = 0,
     col = 0,
@@ -606,6 +633,15 @@ function Buffer:set_header(text, scroll)
       vim.api.nvim_feedkeys(keys, "n", false)
     end)
   end
+
+  -- Ensure the header only covers the intended window.
+  api.nvim_create_autocmd("WinResized", {
+    callback = function()
+      self:resize_header()
+    end,
+    buffer = self.handle,
+    group = self.autocmd_group,
+  })
 end
 
 ---@class BufferConfig
@@ -620,6 +656,7 @@ end
 ---@field status_column string|nil
 ---@field load boolean|nil
 ---@field context_highlight boolean|nil
+---@field active_item_highlight boolean|nil
 ---@field open boolean|nil
 ---@field disable_line_numbers boolean|nil
 ---@field disable_relative_line_numbers boolean|nil
@@ -673,6 +710,11 @@ function Buffer.create(config)
   if config.filetype then
     logger.debug("[BUFFER:" .. buffer.handle .. "] Setting filetype: " .. config.filetype)
     buffer:set_filetype(config.filetype)
+  end
+
+  if config.status_column then
+    buffer:set_buffer_option("statuscolumn", config.status_column)
+    buffer:set_buffer_option("signcolumn", "no")
   end
 
   if config.user_mappings then
@@ -826,13 +868,41 @@ function Buffer.create(config)
     })
   end
 
-  if config.status_column then
-    vim.opt_local.statuscolumn = config.status_column
-    vim.opt_local.signcolumn = "no"
+  if config.active_item_highlight then
+    logger.debug("[BUFFER:" .. buffer.handle .. "] Setting up active item decorations")
+    buffer:create_namespace("ActiveItem")
+    buffer:set_decorations("ActiveItem", {
+      on_start = function()
+        return buffer:exists() and buffer:is_valid()
+      end,
+      on_win = function()
+        buffer:clear_namespace("ActiveItem")
+
+        local active_oid = require("neogit.buffers.commit_view").current_oid()
+        local item = buffer.ui:find_component_by_oid(active_oid)
+        if item and item.first and item.last then
+          for line = item.first, item.last do
+            buffer:add_line_highlight(line - 1, "NeogitActiveItem", {
+              priority = 200,
+              namespace = "ActiveItem",
+            })
+          end
+        end
+      end,
+    })
+
+    -- The decoration provider will not quite update in time, leaving two lines highlighted unless we use an autocmd too
+    api.nvim_create_autocmd("WinLeave", {
+      buffer = buffer.handle,
+      group = buffer.autocmd_group,
+      callback = function()
+        buffer:clear_namespace("ActiveItem")
+      end,
+    })
   end
 
   if config.foldmarkers then
-    vim.opt_local.signcolumn = "auto"
+    buffer:set_buffer_option("signcolumn", "auto")
 
     logger.debug("[BUFFER:" .. buffer.handle .. "] Setting up foldmarkers")
     buffer:create_namespace("FoldSigns")

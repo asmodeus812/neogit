@@ -230,6 +230,7 @@ function M.setup(config)
     NeogitStash                    = { link = "NeogitSubtleText" },
     NeogitRebaseDone               = { link = "NeogitSubtleText" },
     NeogitFold                     = { fg = "None", bg = "None" },
+    NeogitWinSeparator             = { link = "WinSeparator" },
     NeogitChangeMuntracked         = { link = "NeogitChangeModified" },
     NeogitChangeAuntracked         = { link = "NeogitChangeAdded" },
     NeogitChangeNuntracked         = { link = "NeogitChangeNewFile" },
@@ -252,6 +253,7 @@ function M.setup(config)
     NeogitChangeCunstaged          = { link = "NeogitChangeCopied" },
     NeogitChangeUunstaged          = { link = "NeogitChangeUpdated" },
     NeogitChangeRunstaged          = { link = "NeogitChangeRenamed" },
+    NeogitChangeTunstaged          = { link = "NeogitChangeUpdated" },
     NeogitChangeDDunstaged         = { link = "NeogitChangeUnmerged" },
     NeogitChangeUUunstaged         = { link = "NeogitChangeUnmerged" },
     NeogitChangeAAunstaged         = { link = "NeogitChangeUnmerged" },
@@ -267,6 +269,7 @@ function M.setup(config)
     NeogitChangeCstaged            = { link = "NeogitChangeCopied" },
     NeogitChangeUstaged            = { link = "NeogitChangeUpdated" },
     NeogitChangeRstaged            = { link = "NeogitChangeRenamed" },
+    NeogitChangeTstaged            = { link = "NeogitChangeUpdated" },
     NeogitChangeDDstaged           = { link = "NeogitChangeUnmerged" },
     NeogitChangeUUstaged           = { link = "NeogitChangeUnmerged" },
     NeogitChangeAAstaged           = { link = "NeogitChangeUnmerged" },
@@ -302,6 +305,7 @@ function M.setup(config)
     NeogitTagDistance              = { fg = palette.cyan },
     NeogitFloatHeader              = { bg = palette.bg0, bold = palette.bold },
     NeogitFloatHeaderHighlight     = { bg = palette.bg2, fg = palette.cyan, bold = palette.bold },
+    NeogitActiveItem               = { bg = palette.bg_orange, fg = palette.bg0, bold = palette.bold },
   }
 
   for group, hl in pairs(hl_store) do

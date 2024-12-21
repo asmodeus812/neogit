@@ -81,6 +81,15 @@ function M:close()
   M.instance = nil
 end
 
+---@return string
+function M.current_oid()
+  if M.is_open() then
+    return M.instance.commit_info.oid
+  else
+    return "null-oid"
+  end
+end
+
 ---Opens the CommitViewBuffer if it isn't open or performs the given action
 ---which is passed the window id of the commit view buffer
 ---@param commit_id string commit
@@ -145,10 +154,6 @@ end
 function M:open(kind)
   kind = kind or config.values.commit_view.kind
 
-  if M.is_open() then
-    M.instance:close()
-  end
-
   M.instance = self
 
   self.buffer = Buffer.create {
@@ -203,9 +208,18 @@ function M:open(kind)
 
           -- Search for a match and jump if we find it
           for path, line_nr in pairs(diff_headers) do
+            local path_norm = path
+            for _, kind in ipairs { "modified", "renamed", "new file", "deleted file" } do
+              if vim.startswith(path_norm, kind .. " ") then
+                path_norm = string.sub(path_norm, string.len(kind) + 2)
+                break
+              end
+            end
             -- The gsub is to work around the fact that the OverviewFiles use
             -- => in renames but the diff header uses ->
-            if path:gsub(" %-> ", " => "):match(selected_path) then
+            path_norm = path_norm:gsub(" %-> ", " => ")
+
+            if path_norm == selected_path then
               -- Save position in jumplist
               vim.cmd("normal! m'")
 
@@ -276,7 +290,7 @@ function M:open(kind)
         end),
         [popups.mapping_for("RemotePopup")] = popups.open("remote"),
         [popups.mapping_for("RevertPopup")] = popups.open("revert", function(p)
-          p { commits = { self.commit_info.oid } }
+          p { commits = { self.commit_info.oid }, item = self.buffer.ui:get_hunk_or_filename_under_cursor() }
         end),
         [popups.mapping_for("ResetPopup")] = popups.open("reset", function(p)
           p { commit = self.commit_info.oid }

@@ -7,6 +7,7 @@ local logger = require("neogit.logger")
 local input = require("neogit.lib.input")
 local notification = require("neogit.lib.notification")
 local util = require("neogit.lib.util")
+local config = require("neogit.config")
 
 local FuzzyFinderBuffer = require("neogit.buffers.fuzzy_finder")
 
@@ -41,7 +42,7 @@ local function cleanup_items(...)
       api.nvim_buf_delete(bufnr, { force = false })
     end
 
-    fn.delete(item.name)
+    fn.delete(fn.fnameescape(item.name))
   end
 end
 
@@ -119,7 +120,8 @@ M.v_discard = function(self)
             for _, hunk in ipairs(hunks) do
               table.insert(invalidated_diffs, "*:" .. item.name)
               table.insert(patches, function()
-                local patch = git.index.generate_patch(item, hunk, hunk.from, hunk.to, true)
+                local patch =
+                  git.index.generate_patch(hunk, { from = hunk.from, to = hunk.to, reverse = true })
 
                 logger.debug(("Discarding Patch: %s"):format(patch))
 
@@ -230,7 +232,7 @@ M.v_stage = function(self)
 
           if #hunks > 0 then
             for _, hunk in ipairs(hunks) do
-              table.insert(patches, git.index.generate_patch(item, hunk, hunk.from, hunk.to))
+              table.insert(patches, git.index.generate_patch(hunk.hunk, { from = hunk.from, to = hunk.to }))
             end
           else
             if section.name == "unstaged" then
@@ -280,7 +282,10 @@ M.v_unstage = function(self)
 
           if #hunks > 0 then
             for _, hunk in ipairs(hunks) do
-              table.insert(patches, git.index.generate_patch(item, hunk, hunk.from, hunk.to, true))
+              table.insert(
+                patches,
+                git.index.generate_patch(hunk, { from = hunk.from, to = hunk.to, reverse = true })
+              )
             end
           else
             table.insert(files, item.escaped_path)
@@ -773,7 +778,6 @@ M.n_discard = function(self)
       end
     elseif selection.item then -- Discard Hunk
       if selection.item.mode == "UU" then
-        -- TODO: https://github.com/emacs-mirror/emacs/blob/master/lisp/vc/smerge-mode.el
         notification.warn("Resolve conflicts in file before discarding hunks.")
         return
       end
@@ -781,7 +785,7 @@ M.n_discard = function(self)
       local hunk =
         self.buffer.ui:item_hunks(selection.item, selection.first_line, selection.last_line, false)[1]
 
-      local patch = git.index.generate_patch(selection.item, hunk, hunk.from, hunk.to, true)
+      local patch = git.index.generate_patch(hunk, { from = hunk.from, to = hunk.to, reverse = true })
 
       if section == "untracked" then
         message = "Discard hunk?"
@@ -789,9 +793,8 @@ M.n_discard = function(self)
           local hunks =
             self.buffer.ui:item_hunks(selection.item, selection.first_line, selection.last_line, false)
 
-          local patch = git.index.generate_patch(selection.item, hunks[1], hunks[1].from, hunks[1].to, true)
-
-          git.index.apply(patch, { reverse = true })
+          local patch =
+            git.index.generate_patch(hunks[1], { from = hunks[1].from, to = hunks[1].to, reverse = true })
           git.index.apply(patch, { reverse = true })
         end
         refresh = { update_diffs = { "untracked:" .. selection.item.name } }
@@ -825,7 +828,7 @@ M.n_discard = function(self)
         end
 
         if conflict then
-          -- TODO: https://github.com/magit/magit/blob/28bcd29db547ab73002fb81b05579e4a2e90f048/lisp/magit-apply.el#Lair
+          -- TODO: https://github.com/magit/magit/blob/28bcd29db547ab73002fb81b05579e4a2e90f048/lisp/magit-apply.el#L515
           notification.warn("Resolve conflicts before discarding section.")
           return
         else
@@ -964,6 +967,41 @@ M.n_init_repo = function(_self)
 end
 
 ---@param self StatusBuffer
+M.n_rename = function(self)
+  return a.void(function()
+    local selection = self.buffer.ui:get_selection()
+    local paths = git.files.all_tree()
+
+    if
+      selection.item
+      and selection.item.escaped_path
+      and git.files.is_tracked(selection.item.escaped_path)
+    then
+      paths = util.deduplicate(util.merge({ selection.item.escaped_path }, paths))
+    end
+
+    local selected = FuzzyFinderBuffer.new(paths):open_async { prompt_prefix = "Rename file" }
+    if (selected or "") == "" then
+      return
+    end
+
+    local destination = input.get_user_input("Move to", { completion = "dir", prepend = selected })
+    if (destination or "") == "" then
+      return
+    end
+
+    assert(destination, "must have a destination")
+    local success = git.files.move(selected, destination)
+
+    if not success then
+      notification.warn("Renaming failed")
+    end
+
+    self:dispatch_refresh({ update_diffs = { "*:*" } }, "n_rename")
+  end)
+end
+
+---@param self StatusBuffer
 M.n_untrack = function(self)
   return a.void(function()
     local selection = self.buffer.ui:get_selection()
@@ -1025,23 +1063,39 @@ M.n_stage = function(self)
   return a.void(function()
     local stagable = self.buffer.ui:get_hunk_or_filename_under_cursor()
     local section = self.buffer.ui:get_current_section()
+    local selection = self.buffer.ui:get_selection()
 
     if stagable and section then
       if section.options.section == "staged" then
         return
       end
 
-      if stagable.hunk then
+      if selection.item and selection.item.mode == "UU" then
+        if config.check_integration("diffview") then
+          require("neogit.integrations.diffview").open("conflict", selection.item.name, {
+            on_close = {
+              handle = self.buffer.handle,
+              fn = function()
+                if not git.merge.is_conflicted(selection.item.name) then
+                  git.status.stage { selection.item.name }
+                  self:dispatch_refresh({ update_diffs = { "*:" .. selection.item.name } }, "n_stage")
+
+                  if not git.merge.any_conflicted() then
+                    popups.open("merge")()
+                  end
+                end
+              end,
+            },
+          })
+        else
+          notification.info("Conflicts must be resolved before staging")
+          return
+        end
+      elseif stagable.hunk then
         local item = self.buffer.ui:get_item_under_cursor()
         assert(item, "Item cannot be nil")
 
-        if item.mode == "UU" then
-          notification.info("Conflicts must be resolved before staging hunks")
-          return
-        end
-
-        local patch = git.index.generate_patch(item, stagable.hunk, stagable.hunk.from, stagable.hunk.to)
-
+        local patch = git.index.generate_patch(stagable.hunk)
         git.index.apply(patch, { cached = true })
         self:dispatch_refresh({ update_diffs = { "*:" .. item.escaped_path } }, "n_stage")
       elseif stagable.filename then
@@ -1058,8 +1112,28 @@ M.n_stage = function(self)
         git.status.stage_untracked()
         self:dispatch_refresh({ update_diffs = { "untracked:*" } }, "n_stage")
       elseif section.options.section == "unstaged" then
-        git.status.stage_modified()
-        self:dispatch_refresh({ update_diffs = { "*:*" } }, "n_stage")
+        if git.status.any_unmerged() then
+          if config.check_integration("diffview") then
+            require("neogit.integrations.diffview").open("conflict", nil, {
+              on_close = {
+                handle = self.buffer.handle,
+                fn = function()
+                  if not git.merge.any_conflicted() then
+                    git.status.stage_modified()
+                    self:dispatch_refresh({ update_diffs = { "*:*" } }, "n_stage")
+                    popups.open("merge")()
+                  end
+                end,
+              },
+            })
+          else
+            notification.info("Conflicts must be resolved before staging")
+            return
+          end
+        else
+          git.status.stage_modified()
+          self:dispatch_refresh({ update_diffs = { "*:*" } }, "n_stage")
+        end
       end
     end
   end)
@@ -1095,8 +1169,10 @@ M.n_unstage = function(self)
       if unstagable.hunk then
         local item = self.buffer.ui:get_item_under_cursor()
         assert(item, "Item cannot be nil")
-        local patch =
-          git.index.generate_patch(item, unstagable.hunk, unstagable.hunk.from, unstagable.hunk.to, true)
+        local patch = git.index.generate_patch(
+          unstagable.hunk,
+          { from = unstagable.hunk.from, to = unstagable.hunk.to, reverse = true }
+        )
 
         git.index.apply(patch, { cached = true, reverse = true })
         self:dispatch_refresh({ update_diffs = { "*:" .. item.escaped_path } }, "n_unstage")
@@ -1350,7 +1426,12 @@ M.n_open_tree = function(_self)
   return a.void(function()
     local template = "https://${host}/${owner}/${repository}/tree/${branch_name}"
 
-    local url = git.remote.get_url(git.branch.upstream_remote())[1]
+    local upstream = git.branch.upstream_remote()
+    if not upstream then
+      return
+    end
+
+    local url = git.remote.get_url(upstream)[1]
     local format_values = git.remote.parse(url)
     format_values["branch_name"] = git.branch.current()
 
@@ -1397,6 +1478,30 @@ M.n_command = function(self)
       end,
     })
   end)
+end
+
+---@param self StatusBuffer
+M.n_next_section = function(self)
+  return function()
+    local section = self.buffer.ui:get_current_section()
+    if section then
+      local position = section.position.row_end + 2
+      self.buffer:move_cursor(position)
+    end
+  end
+end
+
+---@param self StatusBuffer
+M.n_prev_section = function(self)
+  return function()
+    local section = self.buffer.ui:get_current_section()
+    if section then
+      local prev_section = self.buffer.ui:get_current_section(section.position.row_start - 1)
+      if prev_section then
+        self.buffer:move_cursor(prev_section.position.row_start + 1)
+      end
+    end
+  end
 end
 
 return M

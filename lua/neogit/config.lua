@@ -208,6 +208,10 @@ end
 ---| "YankSelected"
 ---| "OpenOrScrollUp"
 ---| "OpenOrScrollDown"
+---| "PeekUp"
+---| "PeekDown"
+---| "NextSection"
+---| "PreviousSection"
 ---| false
 ---| fun()
 
@@ -401,6 +405,7 @@ function M.get_default_values()
         C = "copied",
         U = "updated",
         R = "renamed",
+        T = "changed",
         DD = "unmerged",
         AU = "unmerged",
         UD = "unmerged",
@@ -615,6 +620,7 @@ function M.get_default_values()
         ["<c-s>"] = "StageAll",
         ["u"] = "Unstage",
         ["K"] = "Untrack",
+        ["R"] = "Rename",
         ["U"] = "UnstageStaged",
         ["y"] = "ShowRefs",
         ["$"] = "CommandHistory",
@@ -631,6 +637,8 @@ function M.get_default_values()
         ["]c"] = "OpenOrScrollDown",
         ["<c-k>"] = "PeekUp",
         ["<c-j>"] = "PeekDown",
+        ["<c-n>"] = "NextSection",
+        ["<c-p>"] = "PreviousSection",
       },
     },
   }

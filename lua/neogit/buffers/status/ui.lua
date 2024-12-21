@@ -235,8 +235,10 @@ local SectionItemFile = function(section, config)
           end
         end
 
-        this:append(DiffHunks(diff))
-        ui:update()
+        ui.buf:with_locked_viewport(function()
+          this:append(DiffHunks(diff))
+          ui:update()
+        end)
       end)
     end
 
@@ -314,7 +316,7 @@ local SectionItemStash = Component.new(function(item)
     text.highlight("NeogitSubtleText")(name),
     text.highlight("NeogitSubtleText")(": "),
     text(item.message),
-  }, { yankable = name, item = item })
+  }, { yankable = item.oid, item = item })
 end)
 
 local SectionItemCommit = Component.new(function(item)

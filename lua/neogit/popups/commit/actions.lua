@@ -8,6 +8,12 @@ local notification = require("neogit.lib.notification")
 local config = require("neogit.config")
 local a = require("plenary.async")
 
+---@param popup PopupData
+---@return boolean
+local function allow_empty(popup)
+  return vim.tbl_contains(popup:get_arguments(), "--allow-empty")
+end
+
 local function confirm_modifications()
   if
     git.branch.upstream()
@@ -37,7 +43,7 @@ local function do_commit(popup, cmd)
 end
 
 local function commit_special(popup, method, opts)
-  if not git.status.anything_staged() then
+  if not git.status.anything_staged() and not allow_empty(popup) then
     if git.status.anything_unstaged() then
       if input.get_permission("Nothing is staged. Commit all uncommitted changed?") then
         opts.all = true
@@ -97,10 +103,27 @@ local function commit_special(popup, method, opts)
 end
 
 function M.commit(popup)
+  if not git.status.anything_staged() and not allow_empty(popup) then
+    notification.warn("No changes to commit.")
+    return
+  end
+
   do_commit(popup, git.cli.commit)
 end
 
 function M.extend(popup)
+  if not git.status.anything_staged() and not allow_empty(popup) then
+    if git.status.anything_unstaged() then
+      if input.get_permission("Nothing is staged. Commit all uncommitted changes?") then
+        git.status.stage_modified()
+      else
+        return
+      end
+    else
+      return notification.warn("No changes to commit.")
+    end
+  end
+
   if not confirm_modifications() then
     return
   end
@@ -158,9 +181,9 @@ function M.absorb(popup)
     return
   end
 
-  if not git.status.anything_staged() then
+  if not git.status.anything_staged() and not allow_empty(popup) then
     if git.status.anything_unstaged() then
-      if input.get_permission("Nothing is staged. Absorb all unstaged changed?") then
+      if input.get_permission("Nothing is staged. Absorb all unstaged changes?") then
         git.status.stage_modified()
       else
         return
@@ -182,7 +205,7 @@ function M.absorb(popup)
     return
   end
 
-  git.cli.absorb.verbose.base(commit).and_rebase.call()
+  git.cli.absorb.verbose.base(commit .. "^").and_rebase.env({ GIT_SEQUENCE_EDITOR = ":" }).call()
 end
 
 return M

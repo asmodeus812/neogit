@@ -48,6 +48,7 @@ local function get_branch_name_user_input(prompt, default)
   return input.get_user_input(prompt, { strip_spaces = true, default = default })
 end
 
+---@param checkout boolean
 local function spin_off_branch(checkout)
   if git.status.is_dirty() and not checkout then
     notification.info("Staying on HEAD due to uncommitted changes")
@@ -59,8 +60,12 @@ local function spin_off_branch(checkout)
     return
   end
 
+  if not git.branch.create(name) then
+    notification.warn("Branch " .. name .. " already exists.")
+    return
+  end
+
   fire_branch_event("NeogitBranchCreate", { branch_name = name })
-  git.branch.create(name)
 
   local current_branch_name = git.branch.current_full_name()
 
@@ -72,6 +77,7 @@ local function spin_off_branch(checkout)
   local upstream = git.branch.upstream()
   if upstream then
     if checkout then
+      assert(current_branch_name, "No current branch")
       git.log.update_ref(current_branch_name, upstream)
     else
       git.cli.reset.hard.args(upstream).call()
@@ -268,7 +274,9 @@ function M.reset_branch(popup)
 
   -- Reset the current branch to the desired state & update reflog
   git.cli.reset.hard.args(to).call()
-  git.log.update_ref(git.branch.current_full_name(), to)
+  local current = git.branch.current_full_name()
+  assert(current, "no current branch")
+  git.log.update_ref(current, to)
 
   notification.info(string.format("Reset '%s' to '%s'", current, to))
   fire_branch_event("NeogitBranchReset", { branch_name = current, resetting_to = to })
@@ -276,7 +284,8 @@ end
 
 function M.delete_branch(popup)
   local options = util.deduplicate(util.merge({ popup.state.env.ref_name }, git.refs.list_branches()))
-  local selected_branch = FuzzyFinderBuffer.new(options):open_async { refocus_status = false }
+  local selected_branch = FuzzyFinderBuffer.new(options)
+    :open_async { prompt_prefix = "Delete branch", refocus_status = false }
   if not selected_branch then
     return
   end
@@ -336,7 +345,12 @@ end
 function M.open_pull_request()
   local template
   local service
-  local url = git.remote.get_url(git.branch.upstream_remote())[1]
+  local upstream = git.branch.upstream_remote()
+  if not upstream then
+    return
+  end
+
+  local url = git.remote.get_url(upstream)[1]
 
   for s, v in pairs(config.values.git_services) do
     if url:match(util.pattern_escape(s)) then
