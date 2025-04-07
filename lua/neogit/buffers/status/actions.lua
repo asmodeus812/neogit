@@ -1079,7 +1079,12 @@ M.n_stage = function(self)
             },
           })
         else
-          notification.info("Conflicts must be resolved before staging")
+          if not git.merge.is_conflicted(selection.item.name) then
+            git.status.stage { selection.item.name }
+            self:dispatch_refresh({ update_diffs = { "*:" .. selection.item.name } }, "n_stage")
+          else
+            notification.info("Conflicts must be resolved before staging")
+          end
           return
         end
       elseif stagable.hunk then
@@ -1088,7 +1093,7 @@ M.n_stage = function(self)
 
         local patch = git.index.generate_patch(item, stagable.hunk, stagable.hunk.from, stagable.hunk.to)
         git.index.apply(patch, { cached = true })
-        self:dispatch_refresh({ update_diffs = { "*:" .. item.escaped_path } }, "n_stage")
+        self:dispatch_refresh({ update_diffs = { "*:" .. item.name } }, "n_stage")
       elseif stagable.filename then
         if section.options.section == "unstaged" then
           git.status.stage { stagable.filename }
@@ -1164,7 +1169,7 @@ M.n_unstage = function(self)
           git.index.generate_patch(item, unstagable.hunk, unstagable.hunk.from, unstagable.hunk.to, true)
 
         git.index.apply(patch, { cached = true, reverse = true })
-        self:dispatch_refresh({ update_diffs = { "*:" .. item.escaped_path } }, "n_unstage")
+        self:dispatch_refresh({ update_diffs = { "*:" .. item.name } }, "n_unstage")
       elseif unstagable.filename then
         git.status.unstage { unstagable.filename }
         self:dispatch_refresh({ update_diffs = { "*:" .. unstagable.filename } }, "n_unstage")
