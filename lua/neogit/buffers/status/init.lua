@@ -6,8 +6,7 @@ local git = require("neogit.lib.git")
 local Watcher = require("neogit.watcher")
 local a = require("plenary.async")
 local logger = require("neogit.logger") -- TODO: Add logging
-
-local api = vim.api
+local event = require("neogit.lib.event")
 
 ---@class Semaphore
 ---@field permits number
@@ -147,6 +146,8 @@ function M:open(kind)
         [mappings["Untrack"]]                   = self:_action("n_untrack"),
         [mappings["Rename"]]                    = self:_action("n_rename"),
         [mappings["Toggle"]]                    = self:_action("n_toggle"),
+        [mappings["OpenFold"]]                  = self:_action("n_open_fold"),
+        [mappings["CloseFold"]]                 = self:_action("n_close_fold"),
         [mappings["Close"]]                     = self:_action("n_close"),
         [mappings["OpenOrScrollDown"]]          = self:_action("n_open_or_scroll_down"),
         [mappings["OpenOrScrollUp"]]            = self:_action("n_open_or_scroll_up"),
@@ -276,7 +277,7 @@ function M:refresh(partial, reason)
     partial = partial,
     callback = function()
       self:redraw(cursor, view)
-      api.nvim_exec_autocmds("User", { pattern = "NeogitStatusRefreshed", modeline = false })
+      event.send("StatusRefreshed")
       logger.info("[STATUS] Refresh complete")
     end,
   }

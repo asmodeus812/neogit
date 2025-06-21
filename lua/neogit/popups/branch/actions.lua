@@ -22,7 +22,7 @@ end
 
 local function checkout_branch(target, args)
   local result = git.branch.checkout(target, args)
-  if result.code > 0 then
+  if result:failure() then
     notification.error(table.concat(result.stderr, "\n"))
     return
   end
@@ -189,7 +189,12 @@ function M.checkout_local_branch(popup)
 
   if target then
     if vim.tbl_contains(remote_branches, target) then
-      git.branch.track(target, popup:get_arguments())
+      local result = git.branch.track(target, popup:get_arguments())
+      if result:failure() then
+        notification.error(table.concat(result.stderr, "\n"))
+        return
+      end
+
       notification.info("Created local branch " .. target .. " tracking remote")
       event.send("BranchCheckout", { branch_name = target })
     elseif not vim.tbl_contains(options, target) then
@@ -225,7 +230,7 @@ function M.configure_branch()
     return
   end
 
-  BranchConfigPopup.create(branch_name)
+  BranchConfigPopup.create { branch = branch_name }
 end
 
 function M.rename_branch()
@@ -241,7 +246,7 @@ function M.rename_branch()
   end
 
   local result = git.cli.branch.move.args(selected_branch, new_name).call { await = true }
-  if result.code == 0 then
+  if result:success() then
     notification.info(string.format("Renamed '%s' to '%s'", selected_branch, new_name))
     event.send("BranchRename", { branch_name = selected_branch, new_name = new_name })
   else
@@ -287,7 +292,7 @@ function M.reset_branch(popup)
 
   -- Reset the current branch to the desired state & update reflog
   local result = git.cli.reset.hard.args(to).call()
-  if result.code == 0 then
+  if result:success() then
     local current = git.branch.current_full_name()
     assert(current, "no current branch")
     git.log.update_ref(current, to)
@@ -315,7 +320,7 @@ function M.delete_branch(popup)
     and branch_name
     and input.get_permission(("Delete remote branch '%s/%s'?"):format(remote, branch_name))
   then
-    success = git.cli.push.remote(remote).delete.to(branch_name).call().code == 0
+    success = git.cli.push.remote(remote).delete.to(branch_name).call():success()
   elseif not remote and branch_name == git.branch.current() then
     local choices = {
       "&detach HEAD and delete",
