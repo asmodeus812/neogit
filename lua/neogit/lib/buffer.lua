@@ -226,6 +226,9 @@ function Buffer:close(force)
 
   if self.kind == "tab" then
     local ok, _ = pcall(vim.cmd, "tabclose")
+    if not ok and #api.nvim_list_tabpages() == 1 then
+      ok, _ = pcall(vim.cmd, "bd! " .. self.handle)
+    end
     if not ok then
       vim.cmd("tab sb " .. self.handle)
       vim.cmd("tabclose #")
@@ -457,7 +460,7 @@ end
 function Buffer:add_highlight(line, col_start, col_end, name, namespace)
   local ns_id = self:get_namespace_id(namespace)
   if ns_id then
-    vim.hl.range(self.handle, ns_id, name, { line, col_start }, { line, col_end })
+    api.nvim_buf_add_highlight(self.handle, ns_id, name, line, col_start, col_end)
   end
 end
 

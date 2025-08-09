@@ -38,15 +38,16 @@ local function cleanup_items(items)
   end
 
   for _, item in ipairs(items) do
-    logger.trace("[cleanup_items()] Cleaning " .. vim.inspect(item.name))
-    assert(item.name, "cleanup_items() - item must have a name")
+    local path = item.absolute_path or item.name
+    logger.debug("[cleanup_items()] Cleaning " .. vim.inspect(path))
+    assert(path, "cleanup_items() - item must have a name")
 
-    local bufnr = fn.bufnr(item.name)
+    local bufnr = fn.bufnr(path)
     if bufnr > 0 then
       api.nvim_buf_delete(bufnr, { force = false })
     end
 
-    fn.delete(fn.fnameescape(item.name))
+    fn.delete(fn.fnameescape(path))
   end
 end
 
@@ -1128,6 +1129,9 @@ M.n_stage = function(self)
           end
           return
         end
+      elseif selection.item and section.options.section == "untracked" then
+        git.index.add { selection.item.name }
+        self:dispatch_refresh({ update_diffs = { "*:" .. selection.item.name } }, "n_stage")
       elseif stagable.hunk then
         local item = self.buffer.ui:get_item_under_cursor()
         assert(item, "Item cannot be nil")
@@ -1135,14 +1139,9 @@ M.n_stage = function(self)
         local patch = git.index.generate_patch(stagable.hunk)
         git.index.apply(patch, { cached = true })
         self:dispatch_refresh({ update_diffs = { "*:" .. item.name } }, "n_stage")
-      elseif stagable.filename then
-        if section.options.section == "unstaged" then
-          git.status.stage { stagable.filename }
-          self:dispatch_refresh({ update_diffs = { "*:" .. stagable.filename } }, "n_stage")
-        elseif section.options.section == "untracked" then
-          git.index.add { stagable.filename }
-          self:dispatch_refresh({ update_diffs = { "*:" .. stagable.filename } }, "n_stage")
-        end
+      elseif stagable.filename and section.options.section == "unstaged" then
+        git.status.stage { stagable.filename }
+        self:dispatch_refresh({ update_diffs = { "*:" .. stagable.filename } }, "n_stage")
       end
     elseif section then
       if section.options.section == "untracked" then
@@ -1196,6 +1195,7 @@ end
 M.n_unstage = function(self)
   return a.void(function()
     local unstagable = self.buffer.ui:get_hunk_or_filename_under_cursor()
+    local selection = self.buffer.ui:get_selection()
 
     local section = self.buffer.ui:get_current_section()
     if section and section.options.section ~= "staged" then
@@ -1203,7 +1203,10 @@ M.n_unstage = function(self)
     end
 
     if unstagable then
-      if unstagable.hunk then
+      if selection.item and selection.item.mode == "N" then
+        git.status.unstage { selection.item.name }
+        self:dispatch_refresh({ update_diffs = { "*:" .. selection.item.name } }, "n_unstage")
+      elseif unstagable.hunk then
         local item = self.buffer.ui:get_item_under_cursor()
         assert(item, "Item cannot be nil")
         local patch = git.index.generate_patch(
