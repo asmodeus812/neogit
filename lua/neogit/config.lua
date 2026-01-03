@@ -63,6 +63,11 @@ function M.get_reversed_commit_editor_maps_I()
 end
 
 ---@return table<string, string[]>
+function M.get_reversed_commit_view_maps()
+  return get_reversed_maps("commit_view")
+end
+
+---@return table<string, string[]>
 function M.get_reversed_refs_view_maps()
   return get_reversed_maps("refs_view")
 end
@@ -217,6 +222,7 @@ end
 ---| "Untrack"
 ---| "RefreshBuffer"
 ---| "GoToFile"
+---| "GoToParentRepo",
 ---| "PeekFile"
 ---| "VSplitOpen"
 ---| "SplitOpen"
@@ -343,6 +349,7 @@ end
 ---@class NeogitConfig Neogit configuration settings
 ---@field filewatcher? NeogitFilewatcherConfig Values for filewatcher
 ---@field graph_style? NeogitGraphStyle Style for graph
+---@field git_executable? string Path to git executable (defaults to "git")
 ---@field commit_date_format? string Commit date format
 ---@field log_date_format? string Log date format
 ---@field disable_hint? boolean Remove the top hint in the Status buffer
@@ -429,8 +436,14 @@ function M.get_default_values()
         commit = "",
         tree = "",
       },
+      ["codeberg.org"] = {
+        pull_request = "https://${host}/${owner}/${repository}/compare/${branch_name}",
+        commit = "https://${host}/${owner}/${repository}/commit/${oid}",
+        tree = "https://${host}/${owner}/${repository}/src/branch/${branch_name}",
+      },
     },
     highlight = {},
+    git_executable = "git",
     disable_insert_on_commit = "auto",
     use_per_project_settings = true,
     remember_settings = true,
@@ -583,6 +596,9 @@ function M.get_default_values()
     },
     ignored_settings = {},
     mappings = {
+      commit_view = {
+        ["a"] = "OpenFileInWorktree",
+      },
       commit_editor = {
         ["q"] = "Close",
         ["<c-c><c-c>"] = "Submit",
@@ -690,6 +706,7 @@ function M.get_default_values()
         ["y"] = "ShowRefs",
         ["$"] = "CommandHistory",
         ["Y"] = "YankSelected",
+        ["gp"] = "GoToParentRepo",
         ["<c-r>"] = "RefreshBuffer",
         ["<cr>"] = "GoToFile",
         ["<s-cr>"] = "PeekFile",
@@ -1177,6 +1194,7 @@ function M.validate_config()
     validate_type(config.disable_hint, "disable_hint", "boolean")
     validate_type(config.disable_context_highlighting, "disable_context_highlighting", "boolean")
     validate_type(config.disable_signs, "disable_signs", "boolean")
+    validate_type(config.git_executable, "git_executable", "string")
     validate_type(config.telescope_sorter, "telescope_sorter", "function")
     validate_type(config.use_per_project_settings, "use_per_project_settings", "boolean")
     validate_type(config.remember_settings, "remember_settings", "boolean")
@@ -1266,6 +1284,12 @@ function M.validate_config()
   end
 
   return errors
+end
+
+---Get the configured git executable path
+---@return string The git executable path
+function M.get_git_executable()
+  return M.values.git_executable
 end
 
 ---@param name string
