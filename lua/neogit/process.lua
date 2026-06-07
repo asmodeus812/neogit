@@ -1,4 +1,4 @@
-local a = require("plenary.async")
+local a = require("neogit.lib.async")
 local notification = require("neogit.lib.notification")
 
 local config = require("neogit.config")
@@ -115,6 +115,21 @@ function Process.new(process)
   return setmetatable(process, Process) ---@class Process
 end
 
+---@return Process
+function Process:clone()
+  return Process.new {
+    cmd = self.cmd,
+    cwd = self.cwd,
+    env = self.env and vim.tbl_extend("force", {}, self.env) or nil,
+    input = self.input,
+    on_error = self.on_error,
+    pty = self.pty,
+    git_hook = self.git_hook,
+    suppress_console = self.suppress_console,
+    user_command = self.user_command,
+  }
+end
+
 local hide_console = false
 function Process.hide_preview_buffers()
   hide_console = true
@@ -226,15 +241,20 @@ function Process:wait(timeout)
 end
 
 function Process:stop()
-  if self.job then
-    assert(fn.jobstop(self.job) == 1, "invalid job id")
+  if self.job and not self.result then
+    -- jobstop returns 1 on success, 0 if the job has already exited / id is
+    -- invalid.  Don't assert: a cancellation racing with normal exit is fine.
+    self.killed = true
+    fn.jobstop(self.job)
   end
 end
 
 --- Spawn and await the process
---- Must be called inside a plenary async context
+--- Must be called inside a neogit async context.
 ---
---- Returns nil if spawning fails
+--- Returns nil if spawning fails.  If the surrounding async task is cancelled
+--- while the process is in flight, the underlying job is killed via
+--- `Process:stop()`.
 ---@param post fun(process: Process)|nil
 ---@return ProcessResult|nil
 function Process:spawn_async(post)
@@ -242,6 +262,10 @@ function Process:spawn_async(post)
     self:spawn(cb)
     if post then
       post(self)
+    end
+    -- Cancel-handle: when the surrounding task is cancelled, kill the job.
+    return function()
+      self:stop()
     end
   end, 1)()
 end
@@ -350,8 +374,10 @@ function Process:spawn(cb)
       self.buffer:append(string.format("Process exited with code: %d", code))
     end
 
-    -- Handle git hook failures and other errors
-    if code > 0 then
+    -- Handle git hook failures and other errors.  Skip entirely if the
+    -- process was killed via Process:stop() (i.e. the surrounding async task
+    -- was cancelled): the non-zero exit is intentional, not a real failure.
+    if code > 0 and not self.killed then
       local should_show_error = self.on_error(res)
       local is_hook_failure = self.git_hook and code > 0
 

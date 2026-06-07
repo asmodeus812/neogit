@@ -8,7 +8,7 @@ local Ui = require("neogit.lib.ui")
 local config = require("neogit.config")
 local diff_highlights = require("neogit.lib.diff_highlights")
 
-local Path = require("plenary.path")
+local Path = require("neogit.lib.path")
 
 ---@class Buffer
 ---@field handle number
@@ -314,6 +314,7 @@ function Buffer:show()
 
   -- Already visible
   if #windows > 0 then
+    logger.debug("Buffer already visible: using that.")
     vim.api.nvim_set_current_win(windows[1])
     return windows[1]
   end
@@ -388,7 +389,7 @@ function Buffer:show()
       api.nvim_win_set_cursor(content_window, { 1, 0 })
       win = content_window
     elseif self.kind == "popup" then
-      -- local title, _ = self.name:gsub("^Neogit", ""):gsub("Popup$", "")
+      local title, _ = self.name:gsub("^Neogit", ""):gsub("Popup$", "")
 
       local content_window = api.nvim_open_win(self.handle, true, {
         anchor = "SW",
@@ -400,8 +401,8 @@ function Buffer:show()
         row = vim.o.lines - vim.o.cmdheight - (vim.o.laststatus > 0 and 1 or 0),
         style = "minimal",
         border = { "─", "─", "─", "", "", "", "", "" },
-        -- title = (" %s Actions "):format(title),
-        -- title_pos = "center",
+        title = config.values.popup.show_title and (" %s Actions "):format(title) or nil,
+        title_pos = config.values.popup.show_title and "center" or nil,
       })
 
       api.nvim_win_set_cursor(content_window, { 1, 0 })
@@ -414,6 +415,8 @@ function Buffer:show()
   -- With focus on a popup window, any kind of "split" buffer will crash. Floating windows cannot be split.
   local ok, win = pcall(open)
   if not ok then
+    logger.debug("There was an issue opening the buffer. Creating floating window.")
+    logger.debug(win)
     self.kind = "floating"
     win = open()
   end
@@ -733,12 +736,6 @@ function Buffer.create(config)
     buffer:replace_content_with(Path:new(config.name):readlines())
   end
 
-  local win
-  if config.open ~= false then
-    win = buffer:show()
-    logger.debug("[BUFFER:" .. buffer.handle .. "] Showing buffer in window " .. win .. " as " .. buffer.kind)
-  end
-
   logger.debug("[BUFFER:" .. buffer.handle .. "] Setting buffer options")
   buffer:set_buffer_option("swapfile", false)
   buffer:set_buffer_option("modeline", false)
@@ -789,6 +786,14 @@ function Buffer.create(config)
         end
       end
     end
+  end
+
+  local win
+  if config.open ~= false then
+    logger.debug("KIND " .. buffer.kind)
+    win = buffer:show()
+    logger.debug("KIND " .. buffer.kind)
+    logger.debug("[BUFFER:" .. buffer.handle .. "] Showing buffer in window " .. win .. " as " .. buffer.kind)
   end
 
   if config.initialize then
